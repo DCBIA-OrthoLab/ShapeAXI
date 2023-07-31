@@ -8,6 +8,7 @@ import argparse
 from argparse import Namespace
 import pandas as pd
 import numpy as np
+import pickle 
 
 import compute_min_scale
 import split_train_eval
@@ -15,7 +16,6 @@ import saxi_train
 import saxi_predict
 import saxi_eval
 import saxi_gradcam
-
 
 class bcolors:
     HEADER = '\033[95m'
@@ -209,6 +209,46 @@ def main(args, arg_groups):
         print(bcolors.SUCCESS, "End evaluation prediction for fold {f}".format(f=f), bcolors.ENDC)
 
 
+    print(bcolors.INFO, "Start aggregate prediction for ALL folds", bcolors.ENDC)
+    # Create a single dataframe and prob array
+    out_prediction_agg = []
+    out_prediction_probs_agg = []
+    for f in range(0, args.folds):
+        
+        ext = os.path.splitext(args.csv)[1]
+        csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
+
+        saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
+        best_model_path = get_best_checkpoint(saxi_train_args_out)
+
+        fname = os.path.basename(csv_test)
+        out_prediction_fn = os.path.join(args.out, 'test', 'fold{f}'.format(f=f), os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+
+        out_prediction_agg.append(pd.read_csv(out_prediction_fn))
+
+        probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
+        out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
+    # Concatenate all datragrames and probs
+    out_prediction_agg = pd.concat(out_prediction_agg)
+    fname = os.path.basename(args.csv)
+    ext = os.path.splitext(args.csv)[1]
+    out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
+    out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
+
+    out_prediction_probs_agg = np.concatenate(out_prediction_probs_agg)
+    out_prediction_probs_agg_fn = out_prediction_agg_fn.replace("_prediction.csv", "_probs.pickle")
+    pickle.dump(out_prediction_probs_agg, open(out_prediction_probs_agg_fn, 'wb'))
+
+    #Run the evaluation for the aggregate
+    saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
+    saxi_eval_args['csv'] = out_prediction_agg_fn
+    saxi_eval_args['csv_true_column'] = args.class_column
+    saxi_eval_args = Namespace(**saxi_eval_args)
+    saxi_eval.main(saxi_eval_args)
+
+    print(bcolors.SUCCESS, "END aggregate prediction for ALL folds", bcolors.ENDC)
+
+        
 
     for f in range(0, args.folds):
 

@@ -104,7 +104,8 @@ def main(args):
 
 
   probs_fn = args.csv.replace("_prediction.csv", "_probs.pickle")
-  if os.path.exists(probs_fn):
+  print(probs_fn, os.path.splitext(probs_fn)[1])
+  if os.path.exists(probs_fn) and os.path.splitext(probs_fn)[1] == ".pickle":
     
     print("Reading:", probs_fn)
 
@@ -145,7 +146,6 @@ def main(args):
     roc_filename = os.path.splitext(args.csv)[0] + "_roc.png"
 
     fig.write_image(roc_filename)
-
 
     support = []
     auc = []
