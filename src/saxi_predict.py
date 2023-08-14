@@ -9,9 +9,9 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+import saxi_nets
 from saxi_dataset import SaxiDataset
 from saxi_transforms import EvalTransform
-from saxi_nets import SaxiClassification
 
 import pickle
 from tqdm import tqdm
@@ -26,9 +26,8 @@ def main(args):
     else:
         df_test = pd.read_parquet(args.csv_test)
 
-
-
-    model = SaxiClassification.load_from_checkpoint(args.model)
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS.load_from_checkpoint(args.model)
 
     model.ico_sphere(args.radius, args.subdivision_level)
 
@@ -43,45 +42,76 @@ def main(args):
     test_ds = SaxiDataset(df_test, transform=EvalTransform(scale_factor), **vars(args))
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
-    probs = []
-    predictions = []
-    softmax = nn.Softmax(dim=1)
+    with torch.no_grad():
 
-    for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
-        
-        V = V.cuda(non_blocking=True)
-        F = F.cuda(non_blocking=True)
-        CN = CN.cuda(non_blocking=True)
+        if args.nn == "SaxiClassification":
 
-        X, PF = model.render(V, F, CN)
-        x, x_s = model(X)
-        
-        x = softmax(x).detach()
-        
-        probs.append(x)
-        predictions.append(torch.argmax(x, dim=1, keepdim=True))
+            probs = []
+            predictions = []
+            softmax = nn.Softmax(dim=1)
 
+            for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
+                
+                V = V.cuda(non_blocking=True)
+                F = F.cuda(non_blocking=True)
+                CN = CN.cuda(non_blocking=True)
 
-    probs = torch.cat(probs).detach().cpu().numpy()
-    predictions = torch.cat(predictions).cpu().numpy().squeeze()
-
-    out_dir = os.path.join(args.out, os.path.basename(args.model))
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+                X, PF = model.render(V, F, CN)
+                x, x_s = model(X)
+                
+                x = softmax(x).detach()
+                
+                probs.append(x)
+                predictions.append(torch.argmax(x, dim=1, keepdim=True))
 
 
-    out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
-    pickle.dump(probs, open(out_probs, 'wb'))
+            probs = torch.cat(probs).detach().cpu().numpy()
+            predictions = torch.cat(predictions).cpu().numpy().squeeze()
 
-    df_test['pred'] = predictions
-    if ext == ".csv":
-        out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
-        df_test.to_csv(out_name, index=False)
-    else:
-        out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
-        df_test.to_parquet(out_name, index=False)
+            out_dir = os.path.join(args.out, os.path.basename(args.model))
+            if not os.path.exists(out_dir):
+                os.makedirs(out_dir)
 
-    return out_name
+
+            out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
+            pickle.dump(probs, open(out_probs, 'wb'))
+
+            df_test['pred'] = predictions
+            if ext == ".csv":
+                out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
+                df_test.to_csv(out_name, index=False)
+            else:
+                out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
+                df_test.to_parquet(out_name, index=False)
+        elif args.nn == "SaxiRegression":        
+            
+            predictions = []
+            softmax = nn.Softmax(dim=1)
+
+            for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
+                
+                V = V.cuda(non_blocking=True)
+                F = F.cuda(non_blocking=True)
+                CN = CN.cuda(non_blocking=True)
+
+                X, PF = model.render(V, F, CN)
+                x, x_s = model(X)
+
+                predictions.append(x.detach())
+            
+            predictions = torch.cat(predictions).cpu().numpy().squeeze()
+
+            out_dir = os.path.join(args.out, os.path.basename(args.model))
+            if not os.path.exists(out_dir):
+                os.makedirs(out_dir)
+
+            df_test['pred'] = predictions
+            if ext == ".csv":
+                out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
+                df_test.to_csv(out_name, index=False)
+            else:
+                out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
+                df_test.to_parquet(out_name, index=False)
 
 
 def get_argparse():
@@ -89,6 +119,7 @@ def get_argparse():
 
     model_group = parser.add_argument_group('Trained')
     model_group.add_argument('--model', help='Model for prediction', type=str, required=True)
+    model_group.add_argument('--nn', help='Neural network name', type=str, default='SaxiClassification')
 
     input_group = parser.add_argument_group('Input')
 

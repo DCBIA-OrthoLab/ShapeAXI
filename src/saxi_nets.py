@@ -434,7 +434,7 @@ class SaxiRegression(pl.LightningModule):
         super(SaxiRegression, self).__init__()
         self.save_hyperparameters()
         
-        self.loss = nn.L1Loss()
+        self.loss = nn.L1Loss(reduction='sum')
 
         if hasattr(monai.networks.nets, self.hparams.base_encoder):
             template_model = getattr(monai.networks.nets, self.hparams.base_encoder)
@@ -497,7 +497,7 @@ class SaxiRegression(pl.LightningModule):
         x_a, x_s = self.A(x_f, x_v)
         x = self.P(x_a)
         
-        return x, x_s
+        return x
 
     def render(self, V, F, CN):
         
@@ -543,7 +543,7 @@ class SaxiRegression(pl.LightningModule):
 
         X, PF = self.render(V, F, CN)
 
-        x, _ = self(X)
+        x = self(X)
             
         loss = self.loss(x, Y)
 
@@ -562,7 +562,7 @@ class SaxiRegression(pl.LightningModule):
         CN = CN.to(self.device, non_blocking=True)
 
         X, PF = self.render(V, F, CN)
-        x, _ = self(X)
+        x = self(X)
             
         loss = self.loss(x, Y)
 

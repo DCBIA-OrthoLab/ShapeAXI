@@ -60,108 +60,133 @@ def plot_confusion_matrix(cm, classes,
 
 def main(args):
 
+  if args.nn == "SaxiClassification":
+    y_true_arr = [] 
+    y_pred_arr = []
 
-  y_true_arr = [] 
-  y_pred_arr = []
+    if(os.path.splitext(args.csv)[1] == ".csv"):        
+        df = pd.read_csv(args.csv)
+    else:        
+        df = pd.read_parquet(args.csv)
 
-  if(os.path.splitext(args.csv)[1] == ".csv"):        
-      df = pd.read_csv(args.csv)
-  else:        
-      df = pd.read_parquet(args.csv)
-
-  if(args.csv_tag_column):
-    class_names = df[[args.csv_tag_column, args.csv_prediction_column]].drop_duplicates()[args.csv_tag_column]
-    class_names.sort()
-  else:
-    class_names = pd.unique(df[args.csv_prediction_column])
-    class_names.sort()
-
-
-  for idx, row in df.iterrows():
-    y_true_arr.append(row[args.csv_true_column])
-    y_pred_arr.append(row[args.csv_prediction_column])
-
-  report = classification_report(y_true_arr, y_pred_arr, output_dict=True)
-  print(json.dumps(report, indent=2))
-
-  cnf_matrix = confusion_matrix(y_true_arr, y_pred_arr)
-  np.set_printoptions(precision=3)
-
-  # Plot non-normalized confusion matrix
-  fig = plt.figure(figsize=args.figsize)
-
-  plot_confusion_matrix(cnf_matrix, classes=class_names, title=args.title)
-  confusion_filename = os.path.splitext(args.csv)[0] + "_confusion.png"
-  fig.savefig(confusion_filename)
+    if(args.csv_tag_column):
+      class_names = df[[args.csv_tag_column, args.csv_prediction_column]].drop_duplicates()[args.csv_tag_column]
+      class_names.sort()
+    else:
+      class_names = pd.unique(df[args.csv_prediction_column])
+      class_names.sort()
 
 
-  # Plot normalized confusion matrix
-  fig2 = plt.figure(figsize=args.figsize)
-  cm = plot_confusion_matrix(cnf_matrix, classes=class_names, normalize=True, title=args.title + ' - normalized')
+    for idx, row in df.iterrows():
+      y_true_arr.append(row[args.csv_true_column])
+      y_pred_arr.append(row[args.csv_prediction_column])
 
-  norm_confusion_filename = os.path.splitext(args.csv)[0] + "_norm_confusion.png"
-  fig2.savefig(norm_confusion_filename)
+    report = classification_report(y_true_arr, y_pred_arr, output_dict=True)
+    print(json.dumps(report, indent=2))
 
+    cnf_matrix = confusion_matrix(y_true_arr, y_pred_arr)
+    np.set_printoptions(precision=3)
 
-  probs_fn = args.csv.replace("_prediction.csv", "_probs.pickle")
-  print(probs_fn, os.path.splitext(probs_fn)[1])
-  if os.path.exists(probs_fn) and os.path.splitext(probs_fn)[1] == ".pickle":
-    
-    print("Reading:", probs_fn)
+    # Plot non-normalized confusion matrix
+    fig = plt.figure(figsize=args.figsize)
 
-    with open(probs_fn, 'rb') as f:
-      y_scores = pickle.load(f)
-
-    y_onehot = pd.get_dummies(y_true_arr)
+    plot_confusion_matrix(cnf_matrix, classes=class_names, title=args.title)
+    confusion_filename = os.path.splitext(args.csv)[0] + "_confusion.png"
+    fig.savefig(confusion_filename)
 
 
-    # Create an empty figure, and iteratively add new lines
-    # every time we compute a new class
-    fig = go.Figure()
-    fig.add_shape(
-        type='line', line=dict(dash='dash'),
-        x0=0, x1=1, y0=0, y1=1
-    )
+    # Plot normalized confusion matrix
+    fig2 = plt.figure(figsize=args.figsize)
+    cm = plot_confusion_matrix(cnf_matrix, classes=class_names, normalize=True, title=args.title + ' - normalized')
 
-    for i in range(y_scores.shape[1]):
+    norm_confusion_filename = os.path.splitext(args.csv)[0] + "_norm_confusion.png"
+    fig2.savefig(norm_confusion_filename)
 
-        y_true = y_onehot.iloc[:, i]
-        y_score = y_scores[:, i]
 
-        fpr, tpr, _ = roc_curve(y_true, y_score)
-        auc_score = roc_auc_score(y_true, y_score)
-        report[str(i)]["auc"] = auc_score
+    probs_fn = args.csv.replace("_prediction.csv", "_probs.pickle")
+    print(probs_fn, os.path.splitext(probs_fn)[1])
+    if os.path.exists(probs_fn) and os.path.splitext(probs_fn)[1] == ".pickle":
+      
+      print("Reading:", probs_fn)
 
-        name = f"{y_onehot.columns[i]} (AUC={auc_score:.2f})"
-        fig.add_trace(go.Scatter(x=fpr, y=tpr, name=name, mode='lines'))
+      with open(probs_fn, 'rb') as f:
+        y_scores = pickle.load(f)
 
-    fig.update_layout(
-        xaxis_title='False Positive Rate',
-        yaxis_title='True Positive Rate',
-        yaxis=dict(scaleanchor="x", scaleratio=1),
-        xaxis=dict(constrain='domain'),
-        width=700, height=500
-    )
+      y_onehot = pd.get_dummies(y_true_arr)
 
-    roc_filename = os.path.splitext(args.csv)[0] + "_roc.png"
 
-    fig.write_image(roc_filename)
+      # Create an empty figure, and iteratively add new lines
+      # every time we compute a new class
+      fig = go.Figure()
+      fig.add_shape(
+          type='line', line=dict(dash='dash'),
+          x0=0, x1=1, y0=0, y1=1
+      )
 
-    support = []
-    auc = []
-    for i in range(y_scores.shape[1]):
-        support.append(report[str(i)]["support"])
-        auc.append(report[str(i)]["auc"])
+      for i in range(y_scores.shape[1]):
 
-    support = np.array(support)
-    auc = np.array(auc)
+          y_true = y_onehot.iloc[:, i]
+          y_score = y_scores[:, i]
 
-    report["macro avg"]["auc"] = np.average(auc) 
-    report["weighted avg"]["auc"] = np.average(auc, weights=support) 
-        
-    df_report = pd.DataFrame(report).transpose()
-    report_filename = os.path.splitext(args.csv)[0] + "_classification_report.csv"
-    df_report.to_csv(report_filename)
+          fpr, tpr, _ = roc_curve(y_true, y_score)
+          auc_score = roc_auc_score(y_true, y_score)
+          report[str(i)]["auc"] = auc_score
+
+          name = f"{y_onehot.columns[i]} (AUC={auc_score:.2f})"
+          fig.add_trace(go.Scatter(x=fpr, y=tpr, name=name, mode='lines'))
+
+      fig.update_layout(
+          xaxis_title='False Positive Rate',
+          yaxis_title='True Positive Rate',
+          yaxis=dict(scaleanchor="x", scaleratio=1),
+          xaxis=dict(constrain='domain'),
+          width=700, height=500
+      )
+
+      roc_filename = os.path.splitext(args.csv)[0] + "_roc.png"
+
+      fig.write_image(roc_filename)
+
+      support = []
+      auc = []
+      for i in range(y_scores.shape[1]):
+          support.append(report[str(i)]["support"])
+          auc.append(report[str(i)]["auc"])
+
+      support = np.array(support)
+      auc = np.array(auc)
+
+      report["macro avg"]["auc"] = np.average(auc) 
+      report["weighted avg"]["auc"] = np.average(auc, weights=support) 
+          
+      df_report = pd.DataFrame(report).transpose()
+      report_filename = os.path.splitext(args.csv)[0] + "_classification_report.csv"
+      df_report.to_csv(report_filename)
+  
+  elif args.nn == "SaxiRegression":
+    y_true_arr = [] 
+    y_pred_arr = []
+
+    if(os.path.splitext(args.csv)[1] == ".csv"):        
+        df = pd.read_csv(args.csv)
+    else:        
+        df = pd.read_parquet(args.csv)
+
+
+    y_true_arr = df[args.csv_true_column]
+    y_pred_arr = df[args.csv_prediction_column]
+
+    df['abs'] = np.abs(y_true_arr - y_pred_arr)
+    df['error'] = y_true_arr - y_pred_arr
+
+
+    fig = px.violin(df, y="abs")
+    abs_filename = os.path.splitext(args.csv)[0] + "_abs.png"
+    fig.write_image(abs_filename)
+
+    fig = px.violin(df, y="error")
+    error_filename = os.path.splitext(args.csv)[0] + "_error.png"
+    fig.write_image(error_filename)
 
 
 def get_argparse():
@@ -171,6 +196,7 @@ def get_argparse():
   parser.add_argument('--csv_true_column', type=str, help='Which column to do the stats on', default="class")
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
+  parser.add_argument('--nn', help='Neural network name for evaluation type', type=str, default='SaxiClassification')
   parser.add_argument('--title', type=str, help='Title for the image', default="Confusion matrix")
   parser.add_argument('--figsize', type=float, nargs='+', help='Figure size', default=(6.4, 4.8))
 

@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from saxi_dataset import SaxiDataset, SaxiDataModule
 from saxi_transforms import TrainTransform, EvalTransform
-from saxi_nets import SaxiClassification
+import saxi_nets
 
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
@@ -42,7 +42,10 @@ def main(args):
 
     test_ds = SaxiDataset(df_test, transform=EvalTransform(), **vars(args))
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
-    model = SaxiClassification.load_from_checkpoint(args.model)
+
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS.load_from_checkpoint(args.model)
+    
     model.ico_sphere(radius=args.radius, subdivision_level=args.subdivision_level)
 
     device = torch.device('cuda')
@@ -60,7 +63,10 @@ def main(args):
 
     # Construct the CAM object once, and then re-use it on many images:
     cam = GradCAM(model=model, target_layers=target_layers)
-    targets = [ClassifierOutputTarget(args.target_class)]
+
+    targets = None
+    if not args.target_class is None:
+        targets = [ClassifierOutputTarget(args.target_class)]
 
     scale_intensity = ScaleIntensityRange(0.0, 1.0, 0, 255)
 
@@ -74,8 +80,7 @@ def main(args):
         F = F.cuda(non_blocking=True)
         CN = CN.cuda(non_blocking=True)
 
-        X, PF = model.render(V, F, CN)        
-
+        X, PF = model.render(V, F, CN)
         gcam_np = cam(input_tensor=X, targets=targets)
 
         GCAM = torch.tensor(gcam_np).to(device)
@@ -92,7 +97,10 @@ def main(args):
         surf = test_ds.getSurf(idx)
 
         V_gcam = numpy_to_vtk(V_gcam.cpu().numpy())
-        array_name = "grad_cam_target_class_{target_class}".format(target_class=args.target_class)
+        if not args.target_class is None:
+            array_name = "grad_cam_target_class_{target_class}".format(target_class=args.target_class)
+        else:
+            array_name = "grad_cam_max"
         V_gcam.SetName(array_name)
         surf.GetPointData().AddArray(V_gcam)
 
@@ -151,9 +159,11 @@ def get_argparse():
     input_group.add_argument('--mount_point', help='Dataset mount directory', type=str, default="./")
 
     model_group = parser.add_argument_group('Model')
-    model_group.add_argument('--model', help='Model for prediction', type=str, required=True)
+    model_group.add_argument('--model', help='Model for prediction', type=str, required=True)    
     model_group.add_argument('--target_layer', help='Target layer for GradCam. For example in ResNet, the target layer is the last conv layer which is layer4', type=str, default='layer4')
-    model_group.add_argument('--target_class', help='Target class', type=int, default=0)
+    model_group.add_argument('--target_class', help='Target class', type=int, default=None)
+    model_group.add_argument('--nn', help='Neural network name', type=str, default='SaxiClassification')
+
 
     hyper_group = parser.add_argument_group('Hyperparameters')
     hyper_group.add_argument('--radius', help='Radius of icosphere', type=float, default=1.35)    
