@@ -20,20 +20,16 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 
 **ShapeAXI** is a state-of-the-art shape analysis framework that harnesses a multi-view approach. This approach is adept at capturing 3D objects from a variety of viewpoints and analyzing them through 2D Convolutional Neural Networks (CNNs).
 
-[![ShapeAXI class 0](doc/images/cleft_gradcam2.png)](https://youtu.be/sgidBWtAVto)
-
-
 ---
 
 ## Installation
 
 ### Requirements:
-- List of software/packages required
-- Compatible Operating Systems
+- CUDA capable system is recommended for training.
 
 ```bash
 # Command to install ShapeAXI
-git clone <repository-url>
+git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
 cd ShapeAXI
 pip install -r requirements.txt
 ```
@@ -44,11 +40,106 @@ pip install -r requirements.txt
 
 To get started with **ShapeAXI**, follow the steps below:
 
-```python
-import ShapeAXI
 
-# Replace with basic usage code for ShapeAXI
+#### Example CSV File
+
+Your input CSV file should be structured as follows:
+
+| surf                                 | class  |
+|--------------------------------------|--------|
+| path/to/shape1.vtk                   | class1 |
+| path/to/shape2.stl                   | class2 |
+| path/to/shape3.obj                   | class1 |
+| ...                                  | ...    |
+
+
+- **surf**: This column holds the file paths to the 3D shape objects. The tool supports the formats `.vtk`, `.stl`, and `.obj`.
+- **class**: This column indicates the class of the 3D object.
+
+### Running ShapeAXI
+
+To use ShapeAXI, execute the `saxi_folds.py` script:
+
+```bash
+python saxi_folds.py --csv your_data.csv --compute_scale_factor 1 --surf_column surf --class_column class --subdivision_level 2 --batch_size 8 --out output_dir/
 ```
+
+Ensure you replace `your_data.csv` with the correct path to your specific CSV file. 
+
+```
+usage: saxi_folds.py [-h] --csv CSV [--folds FOLDS] [--valid_split VALID_SPLIT] [--group_by GROUP_BY] [--nn NN] [--surf_column SURF_COLUMN] [--class_column CLASS_COLUMN] [--compute_scale_factor COMPUTE_SCALE_FACTOR] [--mount_point MOUNT_POINT]
+                     [--num_workers NUM_WORKERS] [--base_encoder BASE_ENCODER] [--base_encoder_params BASE_ENCODER_PARAMS] [--hidden_dim HIDDEN_DIM] [--radius RADIUS] [--subdivision_level SUBDIVISION_LEVEL] [--image_size IMAGE_SIZE] [--lr LR] [--epochs EPOCHS]
+                     [--batch_size BATCH_SIZE] [--patience PATIENCE] [--log_every_n_steps LOG_EVERY_N_STEPS] [--tb_dir TB_DIR] [--tb_name TB_NAME] [--neptune_project NEPTUNE_PROJECT] [--neptune_tags NEPTUNE_TAGS] [--target_layer TARGET_LAYER] [--fps FPS] [--out OUT]
+
+Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability
+
+options:
+  -h, --help            show this help message and exit
+
+Split:
+  --csv CSV             CSV with columns surf,class
+  --folds FOLDS         Number of folds
+  --valid_split VALID_SPLIT
+                        Number of folds
+  --group_by GROUP_BY   GroupBy criteria in the CSV. For example, SubjectID in case the same subjects has multiple timepoints/data points and the subject must belong to the same data split
+
+Train:
+  --nn NN               Type of neural network for training
+  --surf_column SURF_COLUMN
+                        Surface column name
+  --class_column CLASS_COLUMN
+                        Class column name
+  --compute_scale_factor COMPUTE_SCALE_FACTOR
+                        Compute a global scale factor for all shapes in the population.
+  --mount_point MOUNT_POINT
+                        Dataset mount directory
+  --num_workers NUM_WORKERS
+                        Number of workers for loading
+  --base_encoder BASE_ENCODER
+                        Base encoder for the feature extraction
+  --base_encoder_params BASE_ENCODER_PARAMS
+                        Base encoder parameters that are passed to build the feature extraction
+  --hidden_dim HIDDEN_DIM
+                        Hidden dimension for features output. Should match with output of base_encoder. Default value is 512
+  --radius RADIUS       Radius of icosphere
+  --subdivision_level SUBDIVISION_LEVEL
+                        Subdivision level for icosahedron
+  --image_size IMAGE_SIZE
+                        Image resolution size
+  --lr LR, --learning-rate LR
+                        Learning rate
+  --epochs EPOCHS       Max number of epochs
+  --batch_size BATCH_SIZE
+                        Batch size
+  --patience PATIENCE   Patience for early stopping
+  --log_every_n_steps LOG_EVERY_N_STEPS
+                        Log every n steps
+  --tb_dir TB_DIR       Tensorboard output dir
+  --tb_name TB_NAME     Tensorboard experiment name
+  --neptune_project NEPTUNE_PROJECT
+                        Neptune project
+  --neptune_tags NEPTUNE_TAGS
+                        Neptune tags
+
+Explainability group:
+  --target_layer TARGET_LAYER
+                        Target layer for explainability
+  --fps FPS             Frames per second
+
+Output:
+  --out OUT             Output
+```
+
+#### Workflow:
+
+1. On running `saxi_folds.py`, the tool will:
+   - Generate the necessary N folds.
+   - Handle the training, validation, and testing.
+
+2. The tool then produces:
+   - A confusion matrix.
+   - ROC curves.
+   - Explainability maps for each shape in the dataset.
 
 ## Experiments & Results
 
@@ -59,28 +150,25 @@ import ShapeAXI
 - **Categories**: Healthy vs. Degenerative states
 - **Accuracy**: ~79.78%
 
-_Insert graphics or plots related to Condyles Classification results here._
-
-![Condyles Classification Results Placeholder](path/to/your/condyles_results_image.png)
+![Condyles Classification Results Placeholder](doc/images/Deg_classification_aggregate_long_exists_aggregate_prediction_norm_confusion.png)
+![Condyles Classification ROC](doc/images/Deg_classification_aggregate_long_exists_aggregate_prediction_roc.png)
 
 ### Cleft Patients Severity Classification
 
 - **Classes**: Severity levels 0 to 3
 - **Accuracy**: ~81.58%
 
-_Insert graphics or plots related to Cleft Patients Severity Classification here._
-
-![Cleft Patients Severity Classification Results Placeholder](path/to/your/cleft_results_image.png)
-
-_For a more comprehensive breakdown of our results, please visit [this detailed results page](path/to/detailed/results_page)._
-
+![Cleft Patients Severity Classification Results Placeholder](doc/images/Final_ClassificationALLfold_test_prediction_norm_confusion.png)
+![Cleft Patients Severity Classification ROC](doc/images//01.Final_ClassificationALLfold_test_prediction_roc.png)
 ---
 
 ## Explainability
 
 In **ShapeAXI**, we prioritize transparency and understanding. The explainability feature of our framework offers heat-maps which grant insights into its classification rationale.
 
-![Explainability Graphic Placeholder](path/to/your/explainability_image.png)
+https://github.com/DCBIA-OrthoLab/ShapeAXI/assets/7086191/120b0095-5f2d-4f0d-b650-a0587a33e067
+
+https://github.com/DCBIA-OrthoLab/ShapeAXI/assets/7086191/2c635250-624f-4cce-b150-4d5507b398b4
 
 ---
 
