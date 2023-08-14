@@ -158,7 +158,7 @@ Output:
 - **Classes**: Severity levels 0 to 3
 - **Accuracy**: ~81.58%
 
-![Cleft Patients Severity Classification Results Placeholder](doc/images/Final_ClassificationALLfold_test_prediction_norm_confusion.png)
+![Cleft Patients Severity Classification Results Placeholder](doc/images/01.Final_ClassificationALLfold_test_prediction_norm_confusion.png)
 ![Cleft Patients Severity Classification ROC](doc/images//01.Final_ClassificationALLfold_test_prediction_roc.png)
 ---
 
