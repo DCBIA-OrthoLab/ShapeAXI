@@ -1,4 +1,4 @@
-# ShapeAXI Documentation
+# ShapeAXI
 
 Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-edge framework designed for comprehensive shape analysis.
 
