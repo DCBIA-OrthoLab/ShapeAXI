@@ -25,7 +25,8 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 ## Installation
 
 ### Requirements:
-- CUDA capable system is recommended for training.
+
+#### Using pip
 
 ```bash
 # Command to install ShapeAXI
@@ -33,7 +34,7 @@ git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
 cd ShapeAXI
 pip install -r requirements.txt
 ```
-#### Conda
+#### Using Conda
 
 ```bash
 # Command to install ShapeAXI
