@@ -85,6 +85,8 @@ pyquickhelper==1.12.3806
 pyquicksetup==0.2.4
 python-dateutil==2.8.2
 pytorch-lightning==1.8.6
+--find-links=https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu117_pyt201/download.html
+pytorch3d==0.7.4
 pytz==2022.7
 PyWavelets==1.4.1
 PyYAML==6.0
