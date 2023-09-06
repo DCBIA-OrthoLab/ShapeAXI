@@ -34,6 +34,11 @@ cd ShapeAXI
 pip install -r requirements.txt
 ```
 
+#### Install pytorch3d
+```
+pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu117_pyt201/download.html
+```
+
 ## Usage
 
 ### Basic Usage:
