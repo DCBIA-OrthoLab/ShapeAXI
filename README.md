@@ -33,6 +33,14 @@ git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
 cd ShapeAXI
 pip install -r requirements.txt
 ```
+#### Conda
+
+```bash
+# Command to install ShapeAXI
+git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
+cd ShapeAXI
+conda env create -f saxi.yml
+```
 
 ## Usage
 
