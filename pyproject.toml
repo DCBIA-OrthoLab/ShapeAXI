@@ -138,9 +138,7 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = ""
-Issues = ""
-Source = ""
+
 
 [tool.hatch.version]
 path = "src/__about__.py"
