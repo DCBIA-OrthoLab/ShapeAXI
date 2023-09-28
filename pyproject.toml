@@ -2,6 +2,9 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.scripts]
+shapeaxiflo = "src.run_saxi_folds:main"
+
 [project]
 name = "shapeaxiflo"
 dynamic = ["version"]
@@ -135,9 +138,9 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/DCBIA-OrthoLab/ShapeAXI/blob/main/README.md"
+Documentation = ""
 Issues = ""
-Source = "https://github.com/DCBIA-OrthoLab/ShapeAXI"
+Source = ""
 
 [tool.hatch.version]
 path = "src/__about__.py"
@@ -266,4 +269,3 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
-
