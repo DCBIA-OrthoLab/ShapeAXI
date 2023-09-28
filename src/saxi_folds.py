@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import pickle 
 
-import compute_min_scale
+import src.compute_min_scale 
 import split_train_eval
 import saxi_train
 import saxi_predict
@@ -341,9 +341,8 @@ def main(args, arg_groups):
         print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
 
 
-if __name__ == '__main__':
-
-
+# if __name__ == '__main__':
+def main_test():
     parser = argparse.ArgumentParser(description='Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability')
 
     split_group = parser.add_argument_group('Split')
@@ -391,4 +390,3 @@ if __name__ == '__main__':
         arg_groups[group.title] = {a.dest:getattr(args,a.dest,None) for a in group._group_actions}
 
     main(args, arg_groups)
-
