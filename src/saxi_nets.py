@@ -9,7 +9,7 @@ from torchvision import models
 from torchvision import transforms
 import torchmetrics
 
-import utils
+import src.utils
 
 import monai
 from pytorch3d.renderer import (

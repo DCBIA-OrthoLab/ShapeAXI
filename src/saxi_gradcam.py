@@ -9,9 +9,9 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from saxi_dataset import SaxiDataset, SaxiDataModule
-from saxi_transforms import TrainTransform, EvalTransform
-import saxi_nets
+from src.saxi_dataset import SaxiDataset, SaxiDataModule
+from src.saxi_transforms import TrainTransform, EvalTransform
+import src.saxi_nets
 
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
@@ -25,7 +25,7 @@ from monai.transforms import (
     ScaleIntensityRange
 )
 
-import post_process as psp
+import src.post_process as psp
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 

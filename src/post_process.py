@@ -5,7 +5,7 @@ import sys
 import os
 import math
 from collections import namedtuple
-from utils import * 
+from src.utils import * 
 
 def ChangeLabel(vtkdata, label_array, label2change, change):
 	# Set all the label 'label2change' in 'change'
