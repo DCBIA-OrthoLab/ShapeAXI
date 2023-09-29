@@ -5,6 +5,9 @@ build-backend = "hatchling.build"
 [project.scripts]
 shapeaxiflo = "src.saxi_folds:cml"
 
+[tool.hatch.paths]
+src = "src"
+
 [project]
 name = "shapeaxiflo"
 dynamic = ["version"]

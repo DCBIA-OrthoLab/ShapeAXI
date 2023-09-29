@@ -1,4 +1,3 @@
-
 import os
 import sys
 import glob 
@@ -10,10 +9,13 @@ import pandas as pd
 import numpy as np
 import pickle 
 
-import src.compute_min_scale 
+
+src_directory = os.path.join(os.path.dirname(__file__), 'src')
+
+import src_directory.compute_min_scale 
 import split_train_eval
-import src.saxi_eval
-import src.saxi_gradcam
+import saxi_eval
+import saxi_gradcam
 
 class bcolors:
     HEADER = '\033[95m'
