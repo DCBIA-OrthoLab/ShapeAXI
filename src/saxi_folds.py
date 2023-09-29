@@ -11,7 +11,7 @@ import numpy as np
 import pickle 
 
 import src.compute_min_scale 
-import src.split_train_eval
+import split_train_eval
 import src.saxi_eval
 import src.saxi_gradcam
 
@@ -340,7 +340,7 @@ def main(args, arg_groups):
 
 
 # if __name__ == '__main__':
-def main_test():
+def cml():
     parser = argparse.ArgumentParser(description='Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability')
 
     split_group = parser.add_argument_group('Split')

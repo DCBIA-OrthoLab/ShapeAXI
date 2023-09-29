@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-shapeaxiflo = "src.saxi_folds:main_test"
+shapeaxiflo = "src.saxi_folds:cml"
 
 [project]
 name = "shapeaxiflo"
