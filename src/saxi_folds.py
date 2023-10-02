@@ -10,12 +10,11 @@ import numpy as np
 import pickle 
 
 
-src_directory = os.path.join(os.path.dirname(__file__), 'src')
-
-import src_directory.compute_min_scale 
-import split_train_eval
-import saxi_eval
-import saxi_gradcam
+import src.compute_min_scale as compute_min_scale 
+import src.split_train_eval as split_train_eval
+import src.saxi_eval as saxi_eval
+import src.saxi_gradcam as saxi_gradcam
+import src.saxi_train as saxi_train
 
 class bcolors:
     HEADER = '\033[95m'

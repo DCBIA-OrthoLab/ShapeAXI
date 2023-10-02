@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import argparse
 import json
-import src.utils
+import src.utils as utils
 from tqdm import tqdm
 
 def main(args):
