@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-import saxi_nets
+import src.saxi_nets as saxi_nets
 from saxi_dataset import SaxiDataset
 from saxi_transforms import EvalTransform
 

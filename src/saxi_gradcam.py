@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from src.saxi_dataset import SaxiDataset, SaxiDataModule
 from src.saxi_transforms import TrainTransform, EvalTransform
-import src.saxi_nets
+import src.saxi_nets as saxi_nets
 
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
