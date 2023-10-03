@@ -337,8 +337,8 @@ def main(args, arg_groups):
         print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
 
 
-if __name__ == '__main__':
-#def cml():
+
+def cml():
     parser = argparse.ArgumentParser(description='Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability')
 
     split_group = parser.add_argument_group('Split')
