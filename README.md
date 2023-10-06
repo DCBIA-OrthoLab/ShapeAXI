@@ -44,19 +44,20 @@ conda env create -f saxi.yml
 ```
 ### Installation of pytorch3d 
 
-First you have to create a conda environment and activate it:
+First you have to create a __conda__ environment and activate it:
+- Python 3.8, 3.9 or 3.10
 ```bash
-conda create --name "your_new_environment"
+conda create --name "your_new_environment" python=3.X
 conda activate "your_new_environment"
 ```
+(replace the X with 8,9 or 10 for the python version you want)    
+
+
 Then, run these lines:
 ```bash
 conda install pytorch=1.13.0 torchvision pytorch-cuda=11.6 -c pytorch -c nvidia
 conda install -c fvcore -c iopath -c conda-forge fvcore iopath
 conda install -c bottler nvidiacub
-curl -LO https://github.com/NVIDIA/cub/archive/1.10.0.tar.gz
-tar xzf 1.10.0.tar.gz
-export CUB_HOME=$PWD/cub-1.10.0
 conda install pytorch3d -c pytorch3d
 ```
 Finally, check the installation,
