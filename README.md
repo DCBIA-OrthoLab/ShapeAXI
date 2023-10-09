@@ -55,11 +55,23 @@ conda activate "your_new_environment"
 
 Then, run these lines:
 ```bash
-conda install pytorch=1.13.0 torchvision pytorch-cuda=11.6 -c pytorch -c nvidia
-conda install -c fvcore -c iopath -c conda-forge fvcore iopath
-conda install -c bottler nvidiacub
-conda install pytorch3d -c pytorch3d
+pip install ipython
+ipython
 ```
+When you are in the interpreter,
+```bash
+import sys
+import torch
+pyt_version_str=torch.__version__.split("+")[0].replace(".", "")
+version_str="".join([
+    f"py3{sys.version_info.minor}_cu",
+    torch.version.cuda.replace(".",""),
+    f"_pyt{pyt_version_str}"
+])
+!pip install fvcore iopath
+!pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{version_str}/download.html
+```
+
 Finally, check the installation,
 ```bash
 pip show pytorch3d
