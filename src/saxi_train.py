@@ -7,10 +7,10 @@ import numpy as np
 
 import torch
 
-from src.saxi_dataset import SaxiDataset, SaxiDataModule
-from src.saxi_transforms import TrainTransform, EvalTransform
-import src.saxi_nets as saxi_nets
-from src.saxi_logger import SaxiImageLogger
+from saxi_dataset import SaxiDataset, SaxiDataModule
+from saxi_transforms import TrainTransform, EvalTransform
+import saxi_nets
+from saxi_logger import SaxiImageLogger
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
