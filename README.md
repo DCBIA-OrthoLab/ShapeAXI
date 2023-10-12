@@ -24,24 +24,6 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 
 ## Installation
 
-### Requirements:
-
-#### Using pip
-
-```bash
-# Command to install ShapeAXI
-git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
-cd ShapeAXI
-pip install -r requirements.txt
-```
-#### Using Conda
-
-```bash
-# Command to install ShapeAXI
-git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
-cd ShapeAXI
-conda env create -f saxi.yml
-```
 ### Installation of pytorch3d 
 
 First you have to create a __conda__ environment and activate it:
@@ -92,6 +74,25 @@ conda install pytorch3d -c pytorch3d
 Finally, check the installation,
 ```bash
 pip show pytorch3d
+```
+
+### Requirements:
+
+#### Using pip
+
+```bash
+# Command to install ShapeAXI
+git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
+cd ShapeAXI
+pip install -r requirements.txt
+```
+#### Using Conda
+
+```bash
+# Command to install ShapeAXI
+git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
+cd ShapeAXI
+conda env create -f saxi.yml
 ```
 
 ## Usage
