@@ -52,7 +52,7 @@ conda activate "your_new_environment"
 ```
 (replace the X with 8,9 or 10 for the python version you want)    
 
-## If torch is already installed 
+#### If torch is already installed 
 
 Run these lines:
 ```bash
@@ -79,7 +79,7 @@ Finally, check the installation,
 pip show pytorch3d
 ```
 
-## If you do not have torch
+#### If you do not have torch
 
 Run these lines, 
 ```bash
