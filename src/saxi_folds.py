@@ -60,6 +60,10 @@ def get_argparse_dict(parser):
 
 def main(args, arg_groups):
 
+    # if args.nn == "SaxiSegmentation":
+    #     subprocess.call(['python', saxi_train.py, '--csv_train', args.csv_train, '--csv_valid', args.csv_valid, '--csv_test', args.csv_test, '--out', args.out, '--scale_factor', args.scale_factor, '--mount_point', args.mount_point, '--num_workers', args.num_workers, '--base_encoder', args.base_encoder, '--base_encoder_params', args.base_encoder_params, '--hidden_dim', args.hidden_dim, '--radius', args.radius, '--subdivision_level', args.subdivision_level, '--image_size', args.image_size, '--lr', args.lr, '--epochs', args.epochs, '--batch_size', args.batch_size, '--patience', args.patience, '--log_every_n_steps', args.log_every_n_steps, '--tb_dir', args.tb_dir, '--tb_name', args.tb_name, '--neptune_project', args.neptune_project, '--neptune_tags', args.neptune_tags])
+    #     sys.exit()
+
     # Split the input CSV into the number of folds
     create_folds = False
     scale_factor = None
@@ -87,7 +91,6 @@ def main(args, arg_groups):
 
             compute_min_scale_args = Namespace(**compute_min_scale_args)
             scale_factor = compute_min_scale.main(compute_min_scale_args)
-
 
     for f in range(args.folds):
 
@@ -278,28 +281,20 @@ def main(args, arg_groups):
         
 
     for f in range(0, args.folds):
-
         print(bcolors.SUCCESS, "Start explainability for fold {f}".format(f=f), bcolors.ENDC)
-        
         ext = os.path.splitext(args.csv)[1]
         csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
         fname = os.path.basename(csv_test)
-
         df_test = pd.read_csv(csv_test)
-
         saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))        
-
         best_model_path = get_best_checkpoint(saxi_train_args_out)
-
         saxi_predict_args_out = os.path.join(args.out, 'test', 'fold{f}'.format(f=f))
-
         out_prediction = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
         if args.nn == "SaxiClassification":
             for target_class in df_test[args.class_column].unique():
 
                 saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
-
                 saxi_gradcam_args['csv_test'] = out_prediction
                 saxi_gradcam_args['surf_column'] = args.surf_column
                 saxi_gradcam_args['class_column'] = args.class_column
@@ -310,15 +305,12 @@ def main(args, arg_groups):
                 saxi_gradcam_args['target_class'] = target_class
                 saxi_gradcam_args['mount_point'] = args.mount_point
                 saxi_gradcam_args['fps'] = args.fps
-                
-
-
                 saxi_gradcam_args = Namespace(**saxi_gradcam_args)
-
                 saxi_gradcam.main(saxi_gradcam_args)
-        elif args.nn == "SaxiRegression":
-            saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
 
+        elif args.nn == "SaxiRegression":
+
+            saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
             saxi_gradcam_args['csv_test'] = out_prediction
             saxi_gradcam_args['surf_column'] = args.surf_column
             saxi_gradcam_args['class_column'] = args.class_column
@@ -329,9 +321,7 @@ def main(args, arg_groups):
             saxi_gradcam_args['target_class'] = None
             saxi_gradcam_args['mount_point'] = args.mount_point
             saxi_gradcam_args['fps'] = args.fps
-
             saxi_gradcam_args = Namespace(**saxi_gradcam_args)
-
             saxi_gradcam.main(saxi_gradcam_args)
 
         print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
