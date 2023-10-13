@@ -24,26 +24,6 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 
 ## Installation
 
-### Requirements:
-
-#### Using pip
-
-```bash
-# Command to install ShapeAXI
-git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
-cd ShapeAXI
-pip install -r requirements.txt
-```
-#### Using Conda
-
-```bash
-# Command to install ShapeAXI
-git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
-cd ShapeAXI
-conda env create -f saxi.yml
-```
-### Installation of pytorch3d 
-
 First you have to create a __conda__ environment and activate it:
 - Python 3.8, 3.9 or 3.10
 ```bash
@@ -52,29 +32,28 @@ conda activate "your_new_environment"
 ```
 (replace the X with 8,9 or 10 for the python version you want)    
 
+### Installation of pytorch3d 
 
-Then, run these lines:
+Run these lines, 
 ```bash
-pip install ipython
-ipython
-```
-When you are in the interpreter,
-```bash
-import sys
-import torch
-pyt_version_str=torch.__version__.split("+")[0].replace(".", "")
-version_str="".join([
-    f"py3{sys.version_info.minor}_cu",
-    torch.version.cuda.replace(".",""),
-    f"_pyt{pyt_version_str}"
-])
-!pip install fvcore iopath
-!pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{version_str}/download.html
+conda install pytorch=1.13.0 torchvision pytorch-cuda=11.6 -c pytorch -c nvidia
+conda install -c fvcore -c iopath -c conda-forge fvcore iopath
+conda install -c bottler nvidiacub
+conda install pytorch3d -c pytorch3d
 ```
 
 Finally, check the installation,
 ```bash
 pip show pytorch3d
+```
+
+### Requirements:
+
+```bash
+# Command to install ShapeAXI
+git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
+cd ShapeAXI
+pip install -r requirements.txt
 ```
 
 ## Usage
