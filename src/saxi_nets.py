@@ -663,13 +663,11 @@ class MonaiUNet(pl.LightningModule):
         return super().to(device)
 
     def forward(self, x):
-
         V, F, CN = x
-        
         X, PF = self.render(V, F, CN)
         x = self.model(X)
-        
         return x, X, PF
+
 
     def render(self, V, F, CN):
 

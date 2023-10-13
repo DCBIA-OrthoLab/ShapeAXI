@@ -45,7 +45,7 @@ def main(args):
     if model.hparams.scale_factor:
         scale_factor = model.hparams.scale_factor
 
-    test_ds = SaxiDataset(df_test, transform=EvalTransform(scale_factor), **vars(args))
+    test_ds = CustomDataset(df_test, transform=EvalTransform(scale_factor), **vars(args))
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
     with torch.no_grad():
@@ -172,7 +172,7 @@ def main(args):
 
     df = pd.read_csv(os.path.join(mount_point, args.csv))
 
-    ds = TeethDataset(df, mount_point = args.mount_point, transform=UnitSurfTransform(), surf_column="surf")
+    ds = CustomDataset(df, mount_point = args.mount_point, transform=UnitSurfTransform(), surf_column="surf")
 
     dataloader = DataLoader(ds, batch_size=1, num_workers=args.num_workers, persistent_workers=True, pin_memory=True)
     

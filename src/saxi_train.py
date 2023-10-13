@@ -10,7 +10,7 @@ import numpy as np
 
 import torch
 
-from saxi_dataset import SaxiDataset, SaxiDataModule, TeethDataset, TeethDataModule, RandomRemoveTeethTransform, UnitSurfTransform
+from saxi_dataset import CustomDataModule, RandomRemoveTeethTransform, UnitSurfTransform, CustomDataset
 from saxi_transforms import TrainTransform, EvalTransform
 import saxi_nets
 from saxi_nets import MonaiUNet
@@ -45,15 +45,19 @@ def main(args):
 
     saxi_args = vars(args)
 
+    print(f'args.nn: {args.nn}')
 
     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
         early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
         callbacks = [early_stop_callback, checkpoint_callback]
-        saxi_data = SaxiDataModule(df_train, df_val, df_test,
+
+        saxi_data = CustomDataModule(df_train, df_val, df_test,
                             mount_point = mount_point,
                             batch_size = args.batch_size,
                             num_workers = args.num_workers,
-                            surf_column = args.surf_column, class_column=args.class_column,
+                            model = args.nn,
+                            surf_column = args.surf_column,
+                            class_column = args.class_column,
                             train_transform = TrainTransform(scale_factor=args.scale_factor),
                             valid_transform = EvalTransform(scale_factor=args.scale_factor),
                             test_transform = EvalTransform(scale_factor=args.scale_factor))
@@ -99,10 +103,11 @@ def main(args):
 
     elif args.nn == "SaxiSegmentation":
         class_weights = None
-        teeth_data = TeethDataModule(df_train, df_val, df_test,
+        teeth_data = CustomDataModule(df_train, df_val, df_test,
                             mount_point = mount_point,
                             batch_size = args.batch_size,
                             num_workers = args.num_workers,
+                            model = args.nn,
                             surf_column = 'surf', surf_property="UniversalID",
                             train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
                             valid_transform = UnitSurfTransform(),
