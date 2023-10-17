@@ -10,7 +10,7 @@ import numpy as np
 
 import torch
 
-from saxi_dataset import CustomDataModule, RandomRemoveTeethTransform, UnitSurfTransform, CustomDataset
+from saxi_dataset import SaxiDataModule, RandomRemoveTeethTransform, UnitSurfTransform, SaxiDataset
 from saxi_transforms import TrainTransform, EvalTransform
 import saxi_nets
 from saxi_nets import MonaiUNet
@@ -51,7 +51,7 @@ def main(args):
         early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
         callbacks = [early_stop_callback, checkpoint_callback]
 
-        saxi_data = CustomDataModule(df_train, df_val, df_test,
+        saxi_data = SaxiDataModule(df_train, df_val, df_test,
                             mount_point = mount_point,
                             batch_size = args.batch_size,
                             num_workers = args.num_workers,
@@ -103,7 +103,7 @@ def main(args):
 
     elif args.nn == "SaxiSegmentation":
         class_weights = None
-        teeth_data = CustomDataModule(df_train, df_val, df_test,
+        teeth_data = SaxiDataModule(df_train, df_val, df_test,
                             mount_point = mount_point,
                             batch_size = args.batch_size,
                             num_workers = args.num_workers,
@@ -168,7 +168,7 @@ def get_argparse():
     hyper_group.add_argument('--batch_size', help='Batch size', type=int, default=6)    
     hyper_group.add_argument('--train_sphere_samples', help='Number of training sphere samples or views used during training and validation', type=int, default=4)  
     hyper_group.add_argument('--patience', help='Patience for early stopping', type=int, default=30)
-    hyper_group.add_argument('--scale_factor', help='Scale factor to rescale the shapes', type=float, default=None)     
+    hyper_group.add_argument('--scale_factor', help='Scale factor to rescale the shapes', type=float, default=1.0) 
 
     logger_group = parser.add_argument_group('Logger')
     logger_group.add_argument('--log_every_n_steps', help='Log every n steps', type=int, default=10)    

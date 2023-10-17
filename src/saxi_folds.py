@@ -15,6 +15,7 @@ import split_train_eval
 import saxi_eval
 import saxi_gradcam
 import saxi_train
+import saxi_predict
 
 class bcolors:
     HEADER = '\033[95m'
@@ -59,10 +60,50 @@ def get_argparse_dict(parser):
     return default
 
 def main(args, arg_groups):
+    
+    if args.nn == 'SaxiSegmentation':
+        last_checkpoint = get_last_checkpoint(args.out)
+        
+        if last_checkpoint:
+            args.model = last_checkpoint  # Update the model argument with the last checkpoint path
 
-    # if args.nn == "SaxiSegmentation":
-    #     subprocess.call(['python', saxi_train.py, '--csv_train', args.csv_train, '--csv_valid', args.csv_valid, '--csv_test', args.csv_test, '--out', args.out, '--scale_factor', args.scale_factor, '--mount_point', args.mount_point, '--num_workers', args.num_workers, '--base_encoder', args.base_encoder, '--base_encoder_params', args.base_encoder_params, '--hidden_dim', args.hidden_dim, '--radius', args.radius, '--subdivision_level', args.subdivision_level, '--image_size', args.image_size, '--lr', args.lr, '--epochs', args.epochs, '--batch_size', args.batch_size, '--patience', args.patience, '--log_every_n_steps', args.log_every_n_steps, '--tb_dir', args.tb_dir, '--tb_name', args.tb_name, '--neptune_project', args.neptune_project, '--neptune_tags', args.neptune_tags])
-    #     sys.exit()
+        saxi_train_args = {
+            'csv_train': args.csv_train,
+            'csv_valid': args.csv_valid,
+            'csv_test': args.csv_test,
+            'surf_column': args.surf_column,
+            'class_column': args.class_column,
+            'mount_point': args.mount_point,
+            'num_workers': args.num_workers,
+            'nn': args.nn,
+            'model': args.model,
+            'base_encoder': args.base_encoder,
+            'base_encoder_params': args.base_encoder_params,
+            'hidden_dim': args.hidden_dim,
+            'radius': args.radius,
+            'subdivision_level': args.subdivision_level,
+            'image_size': args.image_size,
+            'lr': args.lr,
+            'epochs': args.epochs,
+            'batch_size': args.batch_size,
+            'train_sphere_samples': args.train_sphere_samples,
+            'patience': args.patience,
+            'scale_factor': args.scale_factor,
+            'log_every_n_steps': args.log_every_n_steps,
+            'tb_dir': args.tb_dir,
+            'tb_name': args.tb_name,
+            'neptune_project': args.neptune_project,
+            'neptune_tags': args.neptune_tags,
+            'out': args.out,
+        }
+
+        command = [sys.executable, os.path.join(os.path.dirname(__file__), 'saxi_train.py')] + [f'--{k}={v}' for k, v in saxi_train_args.items()]
+
+        subprocess.run(command)
+        sys.exit()
+
+
+
 
     # Split the input CSV into the number of folds
     create_folds = False
@@ -339,8 +380,15 @@ def cml():
 
     train_group = parser.add_argument_group('Train')
     train_group.add_argument('--nn', help='Type of neural network for training', type=str, default="SaxiClassification")
+    train_group.add_argument('--csv_train', help='CSV with column surf', type=str)
+    train_group.add_argument('--csv_valid', help='CSV with column surf', type=str)
+    train_group.add_argument('--csv_test', help='CSV with column surf', type=str)
+    train_group.add_argument('--model', help='Model to continue training', type=str, default= None)
+    train_group.add_argument('--train_sphere_samples', help='Number of samples for the training sphere', type=int, default=10000)
     train_group.add_argument('--surf_column', help='Surface column name', type=str, default="surf")
     train_group.add_argument('--class_column', help='Class column name', type=str, default="class")
+    train_group.add_argument('--scale_factor', help='Scale factor for the shapes', type=float,default=1.0)
+    train_group.add_argument('--profiler', help='Profiler', type=str, default=None)
     train_group.add_argument('--compute_scale_factor', help='Compute a global scale factor for all shapes in the population.', type=int, default=0)
     train_group.add_argument('--mount_point', help='Dataset mount directory', type=str, default="./")
     train_group.add_argument('--num_workers', help='Number of workers for loading', type=int, default=4)

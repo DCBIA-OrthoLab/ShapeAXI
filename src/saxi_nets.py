@@ -572,35 +572,6 @@ class SaxiRegression(pl.LightningModule):
 
 
 
-#####################----TEETH----#####################
-
-class TimeDistributed(nn.Module):
-    def __init__(self, module):
-        super(TimeDistributed, self).__init__()
-        self.module = module
- 
-    def forward(self, input_seq):
-        assert len(input_seq.size()) > 2
- 
-        # reshape input data --> (samples * timesteps, input_size)
-        # squash timesteps
-
-        size = input_seq.size()
-
-        batch_size = size[0]
-        time_steps = size[1]
-
-        size_reshape = [batch_size*time_steps] + list(size[2:])
-        reshaped_input = input_seq.contiguous().view(size_reshape)
- 
-        output = self.module(reshaped_input)
-        
-        output_size = output.size()
-        output_size = [batch_size, time_steps] + list(output_size[1:])
-        output = output.contiguous().view(output_size)
-
-        return output
-
 class MonaiUNet(pl.LightningModule):
     def __init__(self, args = None, out_channels=3, class_weights=None, image_size=320, radius=1.35, subdivision_level=1, train_sphere_samples=4):
 
@@ -752,11 +723,11 @@ class MonaiUNet(pl.LightningModule):
         self.log("val_acc", self.accuracy, batch_size=batch_size, sync_dist=True)
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, val_batch, batch_idx):
 
         V, F, YF, CN = val_batch
 
-        x, X, PF = self(V, F, CN)
+        x, X, PF = self((V, F, CN))
         y = torch.take(YF, PF).to(torch.int64)*(PF >= 0)
         
         x = x.permute(0, 2, 1, 3, 4) #batch, time, channels, h, w -> batch, channels, time, h, w
