@@ -386,6 +386,30 @@ def ScaleSurf(surf, mean_arr = None, scale_factor = None, copy=True):
 
     return surf, mean_arr, scale_factor
 
+
+def ScaleSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
+    if copy:
+        # Perform a deep copy if needed (create a new tensor with the same data)
+        surf = surf.clone()
+
+    if mean_arr is None:
+        mean_arr = surf.mean(dim=0)
+    
+    bounds_max_arr = surf.max(dim=0)[0]
+
+    # Centering points of the shape
+    surf = surf - mean_arr
+
+    # Computing scale factor if it is not provided
+    if scale_factor is None:
+        scale_factor = 1.0 / (bounds_max_arr - mean_arr).norm()
+
+    # Scale points of the shape by scale factor
+    surf = surf * scale_factor
+
+    return surf, mean_arr, scale_factor
+
+
 def GetActor(surf):
     surfMapper = vtk.vtkPolyDataMapper()
     surfMapper.SetInputData(surf)
@@ -393,8 +417,8 @@ def GetActor(surf):
     surfActor = vtk.vtkActor()
     surfActor.SetMapper(surfMapper)
 
-
     return surfActor
+    
 def GetTransform(rotationAngle, rotationVector):
     transform = vtk.vtkTransform()
     transform.RotateWXYZ(rotationAngle, rotationVector[0], rotationVector[1], rotationVector[2])
@@ -403,6 +427,10 @@ def GetTransform(rotationAngle, rotationVector):
 def RotateSurf(surf, rotationAngle, rotationVector):
     transform = GetTransform(rotationAngle, rotationVector)
     return RotateTransform(surf, transform)
+
+def RotateSurfT(surf, rotation_matrix):
+    surf_rotated = torch.matmul(surf.double(), rotation_matrix) 
+    return surf_rotated
 
 def RotateInverse(surf, rotationAngle, rotationVector):
     transform = vtk.vtkTransform()
@@ -429,15 +457,51 @@ def RotateNpTransform(surf, angle, np_transform):
     rotationVector = np_tran
     return RotateInverse(surf, rotationAngle, rotationVector)
 
+def is_vtk_file(filename):
+    if filename.lower().endswith(".vtk"):
+        return True
+
 def RandomRotation(surf):
     rotationAngle = np.random.random()*360.0
     rotationVector = np.random.random(3)*2.0 - 1.0
     rotationVector = rotationVector/np.linalg.norm(rotationVector)
     return RotateSurf(surf, rotationAngle, rotationVector), rotationAngle, rotationVector
 
+def RandomRotationT(surf):
+    rotationAngle = torch.tensor(np.random.random() * 360.0, dtype=torch.double) 
+    rotationVector = torch.tensor(np.random.random(3) * 2.0 - 1.0, dtype=torch.double)
+    rotationVector = rotationVector / torch.norm(rotationVector)
+
+    rotation_matrix = GetRotationMatrixT(rotationAngle, rotationVector)
+    surf_rotated = RotateSurfT(surf, rotation_matrix)
+
+    return surf_rotated
+
+def GetRotationMatrixT(rotationAngle, rotationVector):
+    axis_x = rotationVector[0]
+    axis_y = rotationVector[1]
+    axis_z = rotationVector[2]
+
+    radians = torch.deg2rad(rotationAngle)
+    cos_theta = torch.cos(radians)
+    sin_theta = torch.sin(radians)
+    complement_cos_theta = 1.0 - cos_theta
+
+    rotation_matrix = torch.tensor([
+        [cos_theta + axis_x * axis_x * complement_cos_theta, axis_x * axis_y * complement_cos_theta - axis_z * sin_theta, axis_x * axis_z * complement_cos_theta + axis_y * sin_theta],
+        [axis_y * axis_x * complement_cos_theta + axis_z * sin_theta, cos_theta + axis_y * axis_y * complement_cos_theta, axis_y * axis_z * complement_cos_theta - axis_x * sin_theta],
+        [axis_z * axis_x * complement_cos_theta - axis_y * sin_theta, axis_z * axis_y * complement_cos_theta + axis_x * sin_theta, cos_theta + axis_z * axis_z * complement_cos_theta]
+    ], dtype=torch.double)
+
+    return rotation_matrix
+
 def GetUnitSurf(surf, mean_arr = None, scale_factor = None, copy=True):
   unit_surf, surf_mean, surf_scale = ScaleSurf(surf, mean_arr, scale_factor, copy)
   return unit_surf
+
+def GetUnitSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
+    unit_surf, surf_mean, surf_scale = ScaleSurfT(surf, mean_arr, scale_factor, copy)
+    return unit_surf
 
 def GetColoredActor(surf, property_name, range_scalars = None):
 
@@ -934,7 +998,7 @@ def PolyDataToTensors(surf, device='cpu'):
     verts, faces, edges = PolyDataToNumpy(surf)
     
     verts = ToTensor(dtype=torch.float32, device=device)(verts)
-    faces = ToTensor(dtype=torch.int32, device=device)(faces)
+    faces = ToTensor(dtype=torch.int64, device=device)(faces)
     edges = ToTensor(dtype=torch.int32, device=device)(edges)
     
     return verts, faces, edges

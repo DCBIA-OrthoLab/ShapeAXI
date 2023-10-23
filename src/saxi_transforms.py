@@ -25,6 +25,9 @@ import utils
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
 
+
+# Explanation : file which is a composition of transformations to be applied during training
+
 def Threshold(vtkdata, labels, threshold_min, threshold_max, invert=False):
     
     threshold = vtk.vtkThreshold()
@@ -50,16 +53,41 @@ def ensure_array(arr):
     else:
         return None
 
+# class UnitSurfTransform:
+#     def __init__(self, scale_factor=None): #scale_factor=0.13043011372797356
+#         self.scale_factor = scale_factor
+#     def __call__(self, surf):
+#         return utils.GetUnitSurf(surf)
+
 class UnitSurfTransform:
-    def __init__(self, scale_factor=None):#scale_factor=0.13043011372797356
+    def __init__(self, scale_factor=None):
         self.scale_factor = scale_factor
+
     def __call__(self, surf):
-        return utils.GetUnitSurf(surf)
+        if isinstance(surf, torch.Tensor):
+            return utils.GetUnitSurfT(surf, scale_factor=self.scale_factor)
+        elif utils.is_vtk_file(surf) == True:
+            return utils.GetUnitSurf(surf, scale_factor=self.scale_factor)
+        else:
+            raise ValueError("Unsupported input type")
+            
+# class RandomRotation:
+#     def __call__(self, surf):
+#         surf, _a, _v = utils.RandomRotation(surf)
+#         return surf
 
 class RandomRotation:
     def __call__(self, surf):
-        surf, _a, _v = utils.RandomRotation(surf)
-        return surf
+        if isinstance(surf, torch.Tensor):
+            return utils.RandomRotationT(surf)
+        elif utils.is_vtk_file(surf) == True:
+            return utils.RandomRotation(surf)
+        else:
+            raise ValueError("Unsupported input type")
+
+
+
+
 
 class RandomRemoveLabeledRegionTransform:
 

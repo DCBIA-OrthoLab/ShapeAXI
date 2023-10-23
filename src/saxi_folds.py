@@ -67,6 +67,8 @@ def main(args, arg_groups):
         if last_checkpoint:
             args.model = last_checkpoint  # Update the model argument with the last checkpoint path
 
+        saxi_train_args = get_argparse_dict(saxi_train.get_argparse())
+        
         saxi_train_args = {
             'csv_train': args.csv_train,
             'csv_valid': args.csv_valid,
@@ -218,7 +220,7 @@ def main(args, arg_groups):
         saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
 
         
-        saxi_predict_args['csv_test'] = csv_test
+        saxi_predict_args['csv'] = csv_test
         saxi_predict_args['model'] = best_model_path
         
         saxi_predict_args['surf_column'] = args.surf_column

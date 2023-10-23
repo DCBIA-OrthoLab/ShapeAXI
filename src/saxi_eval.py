@@ -1,4 +1,3 @@
-
 import numpy as np
 import argparse
 import importlib
@@ -162,6 +161,10 @@ def main(args):
       report_filename = os.path.splitext(args.csv)[0] + "_classification_report.csv"
       df_report.to_csv(report_filename)
   
+  elif args.nn == "SaxiSegmentation":
+    print("Not implemented")
+
+
   elif args.nn == "SaxiRegression":
     y_true_arr = [] 
     y_pred_arr = []

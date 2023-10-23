@@ -30,6 +30,7 @@ class SaxiImageLogger(Callback):
                     grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 3:, :, :])#Grab the depth map. The time dimension is on dim=1
                     trainer.logger.experiment.add_image('X_depth', grid_X, pl_module.global_step)
 
+
 class SaxiImageLoggerNeptune(Callback):
     def __init__(self, num_images=12, log_steps=10):
         self.log_steps = log_steps
@@ -66,6 +67,7 @@ class SaxiImageLoggerNeptune(Callback):
                 # trainer.logger.experiment.add_image('img1', grid_img1.cpu().numpy(), 0)
                 trainer.logger.experiment["images/x_depth"].upload(fig)
                 plt.close()
+
 
 ###########################----TEETH----###########################
 
