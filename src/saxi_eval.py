@@ -10,6 +10,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import roc_curve, auc, roc_auc_score
 from sklearn.metrics import classification_report
 import pandas as pd
+import utils
 
 import matplotlib as mpl
 mpl.use('Agg')
@@ -56,16 +57,19 @@ def plot_confusion_matrix(cm, classes,
 
     return cm
 
+
 def main(args):
 
-  if args.nn == "SaxiClassification":
-    y_true_arr = [] 
-    y_pred_arr = []
+  y_true_arr = [] 
+  y_pred_arr = []
 
-    if(os.path.splitext(args.csv)[1] == ".csv"):        
-        df = pd.read_csv(args.csv)
-    else:        
-        df = pd.read_parquet(args.csv)
+  if(os.path.splitext(args.csv)[1] == ".csv"):        
+      df = pd.read_csv(args.csv)
+  else:        
+      df = pd.read_parquet(args.csv)
+
+
+  if args.nn == "SaxiClassification":
 
     if(args.csv_tag_column):
       class_names = df[[args.csv_tag_column, args.csv_prediction_column]].drop_duplicates()[args.csv_tag_column]
@@ -162,8 +166,127 @@ def main(args):
       df_report.to_csv(report_filename)
   
   elif args.nn == "SaxiSegmentation":
-    print("Not implemented")
+    dice_arr = []
 
+    for idx, row in df.iterrows():
+
+      print("Reading:", row["surf"])
+      surf = utils.ReadSurf(row["surf"])
+      print("Reading:", row["pred"])
+      # pred = utils.ReadSurf(row["pred"])
+
+    #   surf_features_np = vtk_to_numpy(surf.GetPointData().GetScalars(args.surf_id))
+    #   pred_features_np = vtk_to_numpy(pred.GetPointData().GetScalars(args.pred_id))
+
+    #   pred_features_np[pred_features_np==-1] = 1
+
+    #   surf_features_np = np.reshape(surf_features_np, -1)
+    #   pred_features_np = np.reshape(pred_features_np, -1)
+
+    #   unique_v = np.unique(np.union1d(surf_features_np, pred_features_np))
+
+    #   for v in range(1, 34):
+    #     if v not in unique_v:
+    #       # surf_features_np = np.append(surf_features_np, v)
+    #       # pred_features_np = np.append(pred_features_np, 1)
+    #       surf_features_np = np.concatenate([surf_features_np, np.repeat([v], 95)])
+    #       surf_features_np = np.concatenate([surf_features_np, np.repeat([v + 1], 5)])
+    #       pred_features_np = np.concatenate([pred_features_np, np.repeat([v], 95)])
+    #       pred_features_np = np.concatenate([pred_features_np, np.repeat([v], 5)])
+
+    #   jaccard = jaccard_score(surf_features_np, pred_features_np, average=None)
+    #   dice = 2.0*jaccard/(1.0 + jaccard)
+
+    #   #print(np.min(surf_features_np), np.max(pred_features_np))
+
+
+    #   dice_arr.append(dice)
+    #   y_true_arr.extend(surf_features_np)
+    #   y_pred_arr.extend(pred_features_np)
+
+    # dice_arr = np.array(dice_arr)
+
+    # cnf_matrix = confusion_matrix(y_true_arr, y_pred_arr)
+    # fig = plt.figure()
+    # #plot_confusion_matrix(cnf_matrix, classes=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16","33"], title="Confusion Matrix Segmentation")
+    # plot_confusion_matrix(cnf_matrix, classes=["17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32","33"], title="Confusion Matrix Segmentation")
+    # confusion_filename = os.path.splitext(args.csv)[0] + "_confusion.png"
+    # fig.savefig(confusion_filename)
+
+    # cnf_matrix = cnf_matrix.astype('float') / cnf_matrix.sum(axis=1)[:, np.newaxis]
+    # print(cnf_matrix)
+    # FP = cnf_matrix.sum(axis=1) - np.diag(cnf_matrix)  
+    # FN = cnf_matrix.sum(axis=0) - np.diag(cnf_matrix)
+    # TP = np.diag(cnf_matrix)
+    # TN = cnf_matrix.sum() - (FP + FN + TP)
+
+    # # Sensitivity, hit rate, recall, or true positive rate
+    # TPR = TP/(TP+FN)
+    # # Specificity or true negative rate
+    # TNR = TN/(TN+FP) 
+    # # Precision or positive predictive value
+    # PPV = TP/(TP+FP)
+    # # Negative predictive value
+    # NPV = TN/(TN+FN)
+    # # Fall out or false positive rate
+    # FPR = FP/(FP+TN)
+    # # False negative rate
+    # FNR = FN/(TP+FN)
+    # # False discovery rate
+    # FDR = FP/(TP+FP)
+
+    # # Overall accuracy
+    # ACC = (TP+TN)/(TP+FP+FN+TN)
+
+    # F1 = 2 * (PPV * TPR)/(PPV + TPR)
+
+    # print("True positive rate, sensitivity or recall:", TPR)
+    # print("True negative rate or specificity:", TNR)
+    # print("Positive predictive value or precision:", PPV)
+    # print("Negative predictive value:", NPV)
+    # print("False positive rate or fall out", FPR)
+    # print("False negative rate:", FNR)
+    # print("False discovery rate:", FDR)
+    # print("Overall accuracy:", ACC)
+    # print("F1 score:", F1)
+
+    # print(classification_report(y_true_arr, y_pred_arr))
+
+    # jaccard = jaccard_score(y_true_arr, y_pred_arr, average=None)
+    # print("jaccard score:", jaccard)
+    # l_dice = 2.0*jaccard/(1.0 + jaccard)
+    # print("dice:", 2.0*jaccard/(1.0 + jaccard))
+    # print ('dice ', l_dice)
+    # print(f'average dice : {sum(l_dice)/len(l_dice)}')
+
+    # # Plot normalized confusion matrix
+    # fig2 = plt.figure()
+    # #cm = plot_confusion_matrix(cnf_matrix, classes=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16","33"], normalize=True, title="Confusion Matrix Segmentation - normalized")
+    # cm = plot_confusion_matrix(cnf_matrix, classes=["17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32","33"], normalize=True, title="Confusion Matrix Segmentation - normalized")
+    # norm_confusion_filename = os.path.splitext(args.csv)[0] + "_norm_confusion.png"
+    # #plt.show()
+    # fig2.savefig(norm_confusion_filename)
+
+
+    # fig3 = plt.figure() 
+    # # Creating plot
+    # print(dice_arr.shape)
+    # #dice_del = np.delete(dice_arr,[0,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32],1) # upper
+    # dice_del = np.delete(dice_arr,[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,31,32],1)
+    # #print(dice_del.shape)
+    # s = sns.violinplot(data=dice_del, scale='count',cut=0)
+    # #plt.xticks([0, 1, 2, 3, 4, 5, 6,7,8], ["1", "2", "3", "4", "5", "6", "7","8", "9"])
+    # plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["18", "19", "20", "21", "22", "23","24","25","26","27","28","29","30","31"]) # lower
+    # #plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15"]) # upper
+    # #plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32], ["1","2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15","16","17", "18", "19", "20", "21", "22","23","24","25","26","27","28","29","30","31","32","33"]) # lower
+
+
+    # s.set_title('Dice coefficients: lower jaw')
+    # box_plot_filename = os.path.splitext(args.csv)[0] + "_violin_plot.png"
+    # ax = plt.gca()
+    # ax.set_ylim([0.75, 1.005])
+    # plt.show()
+    # fig3.savefig(box_plot_filename)
 
   elif args.nn == "SaxiRegression":
     y_true_arr = [] 

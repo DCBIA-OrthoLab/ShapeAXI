@@ -58,9 +58,11 @@ def main(args):
         class_weights = None
         out_channels = 34
 
-        model = saxi_nets.MonaiUNet(args, out_channels = out_channels, class_weights=class_weights, image_size=320, subdivision_level=2)
+        # model = saxi_nets.MonaiUNet(args, out_channels = out_channels, class_weights=class_weights, image_size=320, subdivision_level=2)
+        # model.model.module.load_state_dict(torch.load(args.model)
+        MONAI = getattr(saxi_nets, args.nn)
+        model = MONAI.load_from_checkpoint(args.model)
 
-        model.model.module.load_state_dict(torch.load(args.model))
 
         ds = SaxiDataset(df, mount_point = args.mount_point, transform=UnitSurfTransform(), surf_column="surf")
 
@@ -148,6 +150,8 @@ def main(args):
     
 
         elif args.nn == "SaxiSegmentation":
+            original_surfaces = []
+            prediction_surfaces = []
 
             for idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
 
@@ -187,15 +191,23 @@ def main(args):
                 if(not os.path.exists(output_dir)):
                     os.makedirs(output_dir)
 
-                # utils.Write(surf , output_fn, print_out=False)
+                utils.Write(surf , output_fn, print_out=False)
 
-                df['pred'] = predictions
-                if ext == ".csv":
-                    out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
-                    df.to_csv(out_name, index=False)
-                else:
-                    out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
-                    df.to_parquet(out_name, index=False)
+                original_surfaces.append(ds.getSurf(idx))  # Assuming you want the original surface
+                prediction_surfaces.append(V_labels_prediction)
+            
+            # Create a DataFrame to combine the data
+            df_data = {
+                'Original Surface': original_surfaces,
+                'Prediction Surface': prediction_surfaces
+            }
+            df = pd.DataFrame(df_data)
+
+            # Save the DataFrame to a CSV file
+            csv_file_path = 'output.csv'  # Change the file path to your desired location
+            df.to_csv(csv_file_path, index=False)
+
+        
     
     
 
@@ -233,4 +245,3 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     main(args)
-

@@ -105,8 +105,8 @@ class SaxiSegmentation(pl.LightningModule):
             self.class_weights = torch.tensor(class_weights).to(torch.float32)
             
         self.loss = monai.losses.DiceCELoss(include_background=False, to_onehot_y=True, softmax=True, ce_weight=self.class_weights)
-        self.accuracy = torchmetrics.Accuracy()
-        
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.out_channels)
+
         unet = monai.networks.nets.UNet(
             spatial_dims=2,
             in_channels=4,   # images: torch.cuda.FloatTensor[batch_size,224,224,4]

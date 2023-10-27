@@ -38,14 +38,12 @@ def main(args):
         monitor='val_loss'
     )
 
-    mount_point = args.mount_point    
+    mount_point = args.mount_point  
     df_train = pd.read_csv(os.path.join(mount_point, args.csv_train))
     df_val = pd.read_csv(os.path.join(mount_point, args.csv_valid))
     df_test = pd.read_csv(os.path.join(mount_point, args.csv_valid))
 
     saxi_args = vars(args)
-
-    print(f'args.nn: {args.nn}')
 
     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
         early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
@@ -79,7 +77,7 @@ def main(args):
             unique_class_weights = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
             class_weights = unique_class_weights
             saxi_args['class_weights'] = class_weights
-            saxi_args['out_classes'] =len(class_weights)
+            saxi_args['out_classes'] = len(class_weights)
 
         elif args.nn =="SaxiRegression":
             saxi_args['out_features'] = 1
@@ -98,22 +96,29 @@ def main(args):
             num_sanity_val_steps=0,
             profiler=args.profiler
         )
+
         trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
 
 
     elif args.nn == "SaxiSegmentation":
         class_weights = None
-        teeth_data = SaxiDataModule(df_train, df_val, df_test,
+
+        saxi_data = SaxiDataModule(df_train, df_val, df_test,
                             mount_point = mount_point,
                             batch_size = args.batch_size,
                             num_workers = args.num_workers,
                             model = args.nn,
-                            surf_column = 'surf', surf_property="UniversalID",
-                            train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
+                            surf_column = 'surf',
+                            surf_property = 'UniversalID',
+                            #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
+                            train_transform = UnitSurfTransform(),
                             valid_transform = UnitSurfTransform(),
                             test_transform = UnitSurfTransform())
 
         early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
+        
+        logger=None
+        
         if args.tb_dir:
             logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
 
@@ -133,8 +138,8 @@ def main(args):
             profiler=args.profiler
         )
 
-        trainer.fit(model, datamodule=teeth_data, ckpt_path=args.model)
-        trainer.test(datamodule=teeth_data)
+        trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
+        trainer.test(datamodule=saxi_data)
 
 
 

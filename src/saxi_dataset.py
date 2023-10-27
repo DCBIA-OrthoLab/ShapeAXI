@@ -47,21 +47,23 @@ class SaxiDataset(Dataset):
 
     def __getitem__(self, idx):
         surf = self.getSurf(idx)
-       
+
         if self.transform:
             surf = self.transform(surf)
-
+    
         surf = utils.ComputeNormals(surf)
-        color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32) / 255.0
-        verts = utils.PolyDataToTensors(surf)[0]
-        faces = utils.PolyDataToTensors(surf)[1]
+        color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
+        verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
+        faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
+        # verts = utils.PolyDataToTensors(surf)[0]
+        # faces = utils.PolyDataToTensors(surf)[1]
 
-        if self.surf_property:
-            faces_pid0 = faces[:, 0:1]
+        if self.surf_property:            
+            faces_pid0 = faces[:,0:1]
             surf_point_data = surf.GetPointData().GetScalars(self.surf_property)
-            surf_point_data = torch.tensor(vtk_to_numpy(surf_point_data)).to(torch.float32)
-            surf_point_data_faces = torch.take(surf_point_data, faces_pid0)
-            surf_point_data_faces[surf_point_data_faces == -1] = 33
+            surf_point_data = torch.tensor(vtk_to_numpy(surf_point_data)).to(torch.float32)            
+            surf_point_data_faces = torch.take(surf_point_data, faces_pid0)            
+            surf_point_data_faces[surf_point_data_faces==-1] = 33            
             return verts, faces, surf_point_data_faces, color_normals
 
         if self.class_column:
@@ -154,8 +156,8 @@ class UnitSurfTransform:
             surf, _a, _v = utils.RandomRotation(surf)
         return surf
 
-class RandomRemoveTeethTransform:
 
+class RandomRemoveTeethTransform:
     def __init__(self, surf_property = None, random_rotation=False, max_remove=4):
 
         self.surf_property = surf_property
@@ -165,11 +167,12 @@ class RandomRemoveTeethTransform:
     def __call__(self, surf):
 
         surf = utils.GetUnitSurf(surf)
+        
         if self.random_rotation:
             surf, _a, _v = utils.RandomRotation(surf)
 
         if self.surf_property:
-            surf_point_data = surf.GetPointData().GetScalars(self.surf_property) 
+            surf_point_data = surf.GetPointData().GetScalars(self.surf_property)
             # ## Remove crown
             unique, counts  = np.unique(surf_point_data, return_counts = True)
 
@@ -202,10 +205,10 @@ class SaxiTimepointsDataset(Dataset):
 
         surf = utils.ComputeNormals(surf)
         color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
-        verts = utils.PolyDataToTensors(surf)[0]
-        faces = utils.PolyDataToTensors(surf)[1]
-        # verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
-        # faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int32)
+        # verts = utils.PolyDataToTensors(surf)[0]
+        # faces = utils.PolyDataToTensors(surf)[1]
+        verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
+        faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
 
         if self.surf_property:            
 

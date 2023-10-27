@@ -59,53 +59,9 @@ def get_argparse_dict(parser):
             default[action.dest] = action.default
     return default
 
+
+
 def main(args, arg_groups):
-    
-    if args.nn == 'SaxiSegmentation':
-        last_checkpoint = get_last_checkpoint(args.out)
-        
-        if last_checkpoint:
-            args.model = last_checkpoint  # Update the model argument with the last checkpoint path
-
-        saxi_train_args = get_argparse_dict(saxi_train.get_argparse())
-        
-        saxi_train_args = {
-            'csv_train': args.csv_train,
-            'csv_valid': args.csv_valid,
-            'csv_test': args.csv_test,
-            'surf_column': args.surf_column,
-            'class_column': args.class_column,
-            'mount_point': args.mount_point,
-            'num_workers': args.num_workers,
-            'nn': args.nn,
-            'model': args.model,
-            'base_encoder': args.base_encoder,
-            'base_encoder_params': args.base_encoder_params,
-            'hidden_dim': args.hidden_dim,
-            'radius': args.radius,
-            'subdivision_level': args.subdivision_level,
-            'image_size': args.image_size,
-            'lr': args.lr,
-            'epochs': args.epochs,
-            'batch_size': args.batch_size,
-            'train_sphere_samples': args.train_sphere_samples,
-            'patience': args.patience,
-            'scale_factor': args.scale_factor,
-            'log_every_n_steps': args.log_every_n_steps,
-            'tb_dir': args.tb_dir,
-            'tb_name': args.tb_name,
-            'neptune_project': args.neptune_project,
-            'neptune_tags': args.neptune_tags,
-            'out': args.out,
-        }
-
-        command = [sys.executable, os.path.join(os.path.dirname(__file__), 'saxi_train.py')] + [f'--{k}={v}' for k, v in saxi_train_args.items()]
-
-        subprocess.run(command)
-        sys.exit()
-
-
-
 
     # Split the input CSV into the number of folds
     create_folds = False
@@ -171,6 +127,7 @@ def main(args, arg_groups):
             split_csv_args = Namespace(**split_csv_args)
             split_train_eval.main(split_csv_args)
 
+
     for f in range(0, args.folds):
 
         print(bcolors.INFO, "Start training for fold {f}".format(f=f), bcolors.ENDC)
@@ -182,19 +139,17 @@ def main(args, arg_groups):
         saxi_train_args = get_argparse_dict(saxi_train.get_argparse())
 
         for k in arg_groups['Train']:
-            if k in saxi_train_args:
+            if k in saxi_train_args:        
                 saxi_train_args[k] = arg_groups['Train'][k]
 
         saxi_train_args['csv_train'] = csv_train
         saxi_train_args['csv_valid'] = csv_valid
         saxi_train_args['csv_test'] = csv_test
         saxi_train_args['out'] = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
-        saxi_train_args['scale_factor'] = scale_factor
 
         last_checkpoint = get_last_checkpoint(saxi_train_args['out'])
-
+        
         if last_checkpoint is None:
-
             command = [sys.executable, os.path.join(os.path.dirname(__file__), 'saxi_train.py')]
 
             for k in saxi_train_args:
@@ -207,7 +162,6 @@ def main(args, arg_groups):
 
     
     for f in range(0, args.folds):
-        
         ext = os.path.splitext(args.csv)[1]
         csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
 
@@ -218,7 +172,6 @@ def main(args, arg_groups):
         best_model_path = get_best_checkpoint(saxi_train_args_out)
 
         saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
-
         
         saxi_predict_args['csv'] = csv_test
         saxi_predict_args['model'] = best_model_path
@@ -233,141 +186,142 @@ def main(args, arg_groups):
 
         fname = os.path.basename(csv_test)
         out_prediction = os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+        print(out_prediction)
 
         if not os.path.exists(out_prediction):
             saxi_predict.main(saxi_predict_args)
 
         print(bcolors.SUCCESS, "End test prediction for fold {f}".format(f=f), bcolors.ENDC)
 
-        print(bcolors.INFO, "Start evaluation for fold {f}".format(f=f), bcolors.ENDC)
 
+        # print(bcolors.INFO, "Start evaluation for fold {f}".format(f=f), bcolors.ENDC)
 
-        saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
+        # saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
 
-        saxi_eval_args['csv'] = out_prediction
-        saxi_eval_args['csv_true_column'] = args.class_column
-        saxi_eval_args['nn'] = args.nn
+        # saxi_eval_args['csv'] = out_prediction
+        # saxi_eval_args['csv_true_column'] = args.class_column
+        # saxi_eval_args['nn'] = args.nn
 
-        saxi_eval_args = Namespace(**saxi_eval_args)
+        # saxi_eval_args = Namespace(**saxi_eval_args)
 
-        saxi_eval.main(saxi_eval_args)
+        # saxi_eval.main(saxi_eval_args)
 
-        print(bcolors.SUCCESS, "End evaluation prediction for fold {f}".format(f=f), bcolors.ENDC)
+        # print(bcolors.SUCCESS, "End evaluation prediction for fold {f}".format(f=f), bcolors.ENDC)
 
-
-    print(bcolors.INFO, "Start aggregate prediction for ALL folds", bcolors.ENDC)
-
-    if args.nn == "SaxiClassification":
-        # Create a single dataframe and prob array
-        out_prediction_agg = []
-        out_prediction_probs_agg = []
-        for f in range(0, args.folds):
+    # if args.nn == "SaxiClassification":
+    #     # Create a single dataframe and prob array
+    #     out_prediction_agg = []
+    #     out_prediction_probs_agg = []
+    #     for f in range(0, args.folds):
             
-            ext = os.path.splitext(args.csv)[1]
-            csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
+    #         ext = os.path.splitext(args.csv)[1]
+    #         csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
 
-            saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
-            best_model_path = get_best_checkpoint(saxi_train_args_out)
+    #         saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
+    #         best_model_path = get_best_checkpoint(saxi_train_args_out)
 
-            fname = os.path.basename(csv_test)
-            out_prediction_fn = os.path.join(args.out, 'test', 'fold{f}'.format(f=f), os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+    #         fname = os.path.basename(csv_test)
+    #         out_prediction_fn = os.path.join(args.out, 'test', 'fold{f}'.format(f=f), os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
-            out_prediction_agg.append(pd.read_csv(out_prediction_fn))
+    #         out_prediction_agg.append(pd.read_csv(out_prediction_fn))
 
-            probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
-            out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
-        # Concatenate all datragrames and probs
-        out_prediction_agg = pd.concat(out_prediction_agg)
-        fname = os.path.basename(args.csv)
-        ext = os.path.splitext(args.csv)[1]
-        out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
-        out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
+    #         probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
+    #         out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
+    #     # Concatenate all datragrames and probs
+    #     out_prediction_agg = pd.concat(out_prediction_agg)
+    #     fname = os.path.basename(args.csv)
+    #     ext = os.path.splitext(args.csv)[1]
+    #     out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
+    #     out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
 
-        out_prediction_probs_agg = np.concatenate(out_prediction_probs_agg)
-        out_prediction_probs_agg_fn = out_prediction_agg_fn.replace("_prediction.csv", "_probs.pickle")
-        pickle.dump(out_prediction_probs_agg, open(out_prediction_probs_agg_fn, 'wb'))
+    #     out_prediction_probs_agg = np.concatenate(out_prediction_probs_agg)
+    #     out_prediction_probs_agg_fn = out_prediction_agg_fn.replace("_prediction.csv", "_probs.pickle")
+    #     pickle.dump(out_prediction_probs_agg, open(out_prediction_probs_agg_fn, 'wb'))
 
-    elif args.nn == "SaxiRegression":
-        # Create a single dataframe and prob array
-        out_prediction_agg = []
+    # elif args.nn == "SaxiRegression":
+    #     # Create a single dataframe and prob array
+    #     out_prediction_agg = []
         
-        for f in range(0, args.folds):
+    #     for f in range(0, args.folds):
             
-            ext = os.path.splitext(args.csv)[1]
-            csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
+    #         ext = os.path.splitext(args.csv)[1]
+    #         csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
 
-            saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
-            best_model_path = get_best_checkpoint(saxi_train_args_out)
+    #         saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
+    #         best_model_path = get_best_checkpoint(saxi_train_args_out)
 
-            fname = os.path.basename(csv_test)
-            out_prediction_fn = os.path.join(args.out, 'test', 'fold{f}'.format(f=f), os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+    #         fname = os.path.basename(csv_test)
+    #         out_prediction_fn = os.path.join(args.out, 'test', 'fold{f}'.format(f=f), os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
-            out_prediction_agg.append(pd.read_csv(out_prediction_fn))
+    #         out_prediction_agg.append(pd.read_csv(out_prediction_fn))
             
-        # Concatenate all datragrames and probs
-        out_prediction_agg = pd.concat(out_prediction_agg)
-        fname = os.path.basename(args.csv)
-        ext = os.path.splitext(args.csv)[1]
-        out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
-        out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
+    #     # Concatenate all datragrames and probs
+    #     out_prediction_agg = pd.concat(out_prediction_agg)
+    #     fname = os.path.basename(args.csv)
+    #     ext = os.path.splitext(args.csv)[1]
+    #     out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
+    #     out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
+    
+    # elif args.nn == "SaxiSegmentation":
+    #     print("Not implemented yet")
 
-    #Run the evaluation for the aggregate
-    saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
-    saxi_eval_args['csv'] = out_prediction_agg_fn
-    saxi_eval_args['csv_true_column'] = args.class_column
-    saxi_eval_args['nn'] = args.nn
-    saxi_eval_args = Namespace(**saxi_eval_args)    
-    saxi_eval.main(saxi_eval_args)
+    # #Run the evaluation for the aggregate
+    # saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
+    # saxi_eval_args['csv'] = out_prediction_agg_fn
+    # saxi_eval_args['csv_true_column'] = args.class_column
+    # saxi_eval_args['nn'] = args.nn
+    # saxi_eval_args = Namespace(**saxi_eval_args)    
+    # saxi_eval.main(saxi_eval_args)
 
-    print(bcolors.SUCCESS, "END aggregate prediction for ALL folds", bcolors.ENDC)
+    # print(bcolors.SUCCESS, "END aggregate prediction for ALL folds", bcolors.ENDC)
 
         
 
-    for f in range(0, args.folds):
-        print(bcolors.SUCCESS, "Start explainability for fold {f}".format(f=f), bcolors.ENDC)
-        ext = os.path.splitext(args.csv)[1]
-        csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
-        fname = os.path.basename(csv_test)
-        df_test = pd.read_csv(csv_test)
-        saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))        
-        best_model_path = get_best_checkpoint(saxi_train_args_out)
-        saxi_predict_args_out = os.path.join(args.out, 'test', 'fold{f}'.format(f=f))
-        out_prediction = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+    # for f in range(0, args.folds):
+    #     print(bcolors.SUCCESS, "Start explainability for fold {f}".format(f=f), bcolors.ENDC)
+    #     ext = os.path.splitext(args.csv)[1]
+    #     csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
+    #     fname = os.path.basename(csv_test)
+    #     df_test = pd.read_csv(csv_test)
+    #     saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))        
+    #     best_model_path = get_best_checkpoint(saxi_train_args_out)
+    #     saxi_predict_args_out = os.path.join(args.out, 'test', 'fold{f}'.format(f=f))
+    #     out_prediction = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
-        if args.nn == "SaxiClassification":
-            for target_class in df_test[args.class_column].unique():
+    #     if args.nn == "SaxiClassification":
+    #         for target_class in df_test[args.class_column].unique():
 
-                saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
-                saxi_gradcam_args['csv_test'] = out_prediction
-                saxi_gradcam_args['surf_column'] = args.surf_column
-                saxi_gradcam_args['class_column'] = args.class_column
-                saxi_gradcam_args['num_workers'] = args.num_workers
-                saxi_gradcam_args['model'] = best_model_path
-                saxi_gradcam_args['nn'] = args.nn
-                saxi_gradcam_args['target_layer'] = args.target_layer
-                saxi_gradcam_args['target_class'] = target_class
-                saxi_gradcam_args['mount_point'] = args.mount_point
-                saxi_gradcam_args['fps'] = args.fps
-                saxi_gradcam_args = Namespace(**saxi_gradcam_args)
-                saxi_gradcam.main(saxi_gradcam_args)
+    #             saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
+    #             saxi_gradcam_args['csv_test'] = out_prediction
+    #             saxi_gradcam_args['surf_column'] = args.surf_column
+    #             saxi_gradcam_args['class_column'] = args.class_column
+    #             saxi_gradcam_args['num_workers'] = args.num_workers
+    #             saxi_gradcam_args['model'] = best_model_path
+    #             saxi_gradcam_args['nn'] = args.nn
+    #             saxi_gradcam_args['target_layer'] = args.target_layer
+    #             saxi_gradcam_args['target_class'] = target_class
+    #             saxi_gradcam_args['mount_point'] = args.mount_point
+    #             saxi_gradcam_args['fps'] = args.fps
+    #             saxi_gradcam_args = Namespace(**saxi_gradcam_args)
+    #             saxi_gradcam.main(saxi_gradcam_args)
 
-        elif args.nn == "SaxiRegression":
+    #     elif args.nn == "SaxiRegression":
 
-            saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
-            saxi_gradcam_args['csv_test'] = out_prediction
-            saxi_gradcam_args['surf_column'] = args.surf_column
-            saxi_gradcam_args['class_column'] = args.class_column
-            saxi_gradcam_args['num_workers'] = args.num_workers
-            saxi_gradcam_args['model'] = best_model_path
-            saxi_gradcam_args['nn'] = args.nn
-            saxi_gradcam_args['target_layer'] = args.target_layer
-            saxi_gradcam_args['target_class'] = None
-            saxi_gradcam_args['mount_point'] = args.mount_point
-            saxi_gradcam_args['fps'] = args.fps
-            saxi_gradcam_args = Namespace(**saxi_gradcam_args)
-            saxi_gradcam.main(saxi_gradcam_args)
+    #         saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
+    #         saxi_gradcam_args['csv_test'] = out_prediction
+    #         saxi_gradcam_args['surf_column'] = args.surf_column
+    #         saxi_gradcam_args['class_column'] = args.class_column
+    #         saxi_gradcam_args['num_workers'] = args.num_workers
+    #         saxi_gradcam_args['model'] = best_model_path
+    #         saxi_gradcam_args['nn'] = args.nn
+    #         saxi_gradcam_args['target_layer'] = args.target_layer
+    #         saxi_gradcam_args['target_class'] = None
+    #         saxi_gradcam_args['mount_point'] = args.mount_point
+    #         saxi_gradcam_args['fps'] = args.fps
+    #         saxi_gradcam_args = Namespace(**saxi_gradcam_args)
+    #         saxi_gradcam.main(saxi_gradcam_args)
 
-        print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
+    #     print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
 
 def cml():
     parser = argparse.ArgumentParser(description='Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability')
@@ -375,8 +329,8 @@ def cml():
     split_group = parser.add_argument_group('Split')
 
     split_group.add_argument('--csv', help='CSV with columns surf,class', type=str, required=True)
-    split_group.add_argument('--folds', help='Number of folds', type=int, default=5)
-    split_group.add_argument('--valid_split', help='Number of folds', type=float, default=0.1)
+    split_group.add_argument('--folds', help='Number of folds', type=int, default=2)
+    split_group.add_argument('--valid_split', help='Number of folds', type=float, default=0.2)
     split_group.add_argument('--group_by', help='GroupBy criteria in the CSV. For example, SubjectID in case the same subjects has multiple timepoints/data points and the subject must belong to the same data split', type=str, default=None)
 
 
@@ -401,7 +355,7 @@ def cml():
     train_group.add_argument('--subdivision_level', help='Subdivision level for icosahedron', type=int, default=1)
     train_group.add_argument('--image_size', help='Image resolution size', type=float, default=256)
     train_group.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='Learning rate')
-    train_group.add_argument('--epochs', help='Max number of epochs', type=int, default=200)   
+    train_group.add_argument('--epochs', help='Max number of epochs', type=int, default=2)   
     train_group.add_argument('--batch_size', help='Batch size', type=int, default=6)    
     train_group.add_argument('--patience', help='Patience for early stopping', type=int, default=30)
     train_group.add_argument('--log_every_n_steps', help='Log every n steps', type=int, default=10)    

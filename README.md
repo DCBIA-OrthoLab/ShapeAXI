@@ -267,3 +267,11 @@ Of course! Here are some general FAQ entries tailored for a tool/framework like 
 ---
 
 **ShapeAXI Team**: For further details, inquiries, or suggestions, feel free to [contact us](mailto:juan_prieto@med.unc.edu).
+
+
+
+##################----TEETH----##################
+import utils
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+import nrrd
+#################################################

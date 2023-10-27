@@ -65,12 +65,11 @@ class UnitSurfTransform:
 
     def __call__(self, surf):
         if isinstance(surf, torch.Tensor):
-            return utils.GetUnitSurfT(surf, scale_factor=self.scale_factor)
-        elif utils.is_vtk_file(surf) == True:
-            return utils.GetUnitSurf(surf, scale_factor=self.scale_factor)
+            return utils.GetUnitSurfT(surf)
         else:
-            raise ValueError("Unsupported input type")
+            return utils.GetUnitSurf(surf)
             
+
 # class RandomRotation:
 #     def __call__(self, surf):
 #         surf, _a, _v = utils.RandomRotation(surf)
@@ -79,11 +78,10 @@ class UnitSurfTransform:
 class RandomRotation:
     def __call__(self, surf):
         if isinstance(surf, torch.Tensor):
-            return utils.RandomRotationT(surf)
-        elif utils.is_vtk_file(surf) == True:
-            return utils.RandomRotation(surf)
+            surf, _a, _v = utils.RandomRotationT(surf)      
         else:
-            raise ValueError("Unsupported input type")
+            surf, _a, _v = utils.RandomRotation(surf)
+        return surf
 
 
 
