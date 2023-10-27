@@ -1,0 +1,23 @@
+args: !!python/object:argparse.Namespace
+  batch_size: 60
+  csv_test: teeth-grand_challenge_vtk/test.csv
+  csv_train: teeth-grand_challenge_vtk/train.csv
+  csv_valid: teeth-grand_challenge_vtk/val.csv
+  epochs: 200
+  log_every_n_steps: 10
+  lr: 0.0001
+  model: null
+  mount_point: /work/floda/data/DCBIA/
+  num_workers: 16
+  out: training_output/
+  patience: 30
+  profiler: null
+  tb_dir: tensorboard/
+  tb_name: flyby
+  train_sphere_samples: 4
+class_weights: null
+image_size: 320
+out_channels: 34
+radius: 1.35
+subdivision_level: 1
+train_sphere_samples: 4
