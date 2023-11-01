@@ -10,11 +10,11 @@ import numpy as np
 
 import torch
 
-from saxi_dataset import SaxiDataModule, RandomRemoveTeethTransform, UnitSurfTransform, SaxiDataset
-from saxi_transforms import TrainTransform, EvalTransform
-import saxi_nets
-from saxi_nets import MonaiUNet
-from saxi_logger import SaxiImageLogger, TeethNetImageLogger
+from src.saxi_dataset import SaxiDataModule, RandomRemoveTeethTransform, UnitSurfTransform, SaxiDataset
+from src.saxi_transforms import TrainTransform, EvalTransform
+import src.saxi_nets as saxi_nets
+from src.saxi_nets import MonaiUNet
+from src.saxi_logger import SaxiImageLogger, TeethNetImageLogger
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -23,10 +23,7 @@ from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger
 
 from sklearn.utils import class_weight
-
-##########################----TEETH----##########################
 from pl_bolts.models.self_supervised import Moco_v2
-#################################################################
 
 
 def main(args):

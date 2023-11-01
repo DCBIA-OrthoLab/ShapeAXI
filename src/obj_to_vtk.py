@@ -7,7 +7,7 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from tqdm import tqdm
 from pathlib import Path
 import sys
-import utils
+import src.utils as utils
 import argparse
 
 def main(args):

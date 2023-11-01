@@ -9,18 +9,17 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-import saxi_nets
-from saxi_dataset import SaxiDataset, RandomRemoveTeethTransform, UnitSurfTransform
-from saxi_transforms import EvalTransform
+import src.saxi_nets as saxi_nets
+from src.saxi_dataset import SaxiDataset, RandomRemoveTeethTransform, UnitSurfTransform
+from src.saxi_transforms import EvalTransform
 
 import pickle
 from tqdm import tqdm
 
-##################----TEETH----##################
-import utils
+import src.utils as utils
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 import nrrd
-#################################################
+
 
 
 def main(args):
@@ -150,8 +149,6 @@ def main(args):
     
 
         elif args.nn == "SaxiSegmentation":
-            original_surfaces = []
-            prediction_surfaces = []
 
             for idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
 
@@ -185,32 +182,28 @@ def main(args):
                 surf.GetPointData().AddArray(V_labels_prediction)
 
                 output_fn = os.path.join(args.out, df["surf"][idx])
-
-                output_dir = os.path.dirname(output_fn)
-
-                if(not os.path.exists(output_dir)):
-                    os.makedirs(output_dir)
+                output_fn = output_fn.replace("./", "")
+                
+                out_dir = os.path.dirname(output_fn)
+                if not os.path.exists(out_dir):
+                    os.makedirs(out_dir)
 
                 utils.Write(surf , output_fn, print_out=False)
 
-                original_surfaces.append(ds.getSurf(idx))  # Assuming you want the original surface
-                prediction_surfaces.append(V_labels_prediction)
-            
-            # Create a DataFrame to combine the data
-            df_data = {
-                'Original Surface': original_surfaces,
-                'Prediction Surface': prediction_surfaces
+            out_dir = os.path.join(args.out, os.path.basename(args.model))
+            if not os.path.exists(out_dir):
+                os.makedirs(out_dir)
+
+            data = {
+                "surf": df["surf"],
+                "pred": [os.path.join(args.out, df["surf"][idx]) for idx in range(len(df))]
             }
-            df = pd.DataFrame(df_data)
+            
+            result_df = pd.DataFrame(data)
 
-            # Save the DataFrame to a CSV file
-            csv_file_path = 'output.csv'  # Change the file path to your desired location
-            df.to_csv(csv_file_path, index=False)
-
-        
-    
-    
-
+            output_fn = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
+            print(f"Saving results to {output_fn}")
+            result_df.to_csv(output_fn, index=False)              
 
 
 def get_argparse():

@@ -20,7 +20,7 @@ else:
   code_path = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[:-1])
 sys.path.append(code_path)
 
-import utils
+import src.utils as utils
 
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
