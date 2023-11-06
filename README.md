@@ -63,15 +63,6 @@ Finally, check the installation,
 pip show pytorch3d
 ```
 
-### Requirements:
-
-```bash
-# Command to install ShapeAXI
-git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
-cd ShapeAXI
-pip install -r requirements.txt
-```
-
 ## Usage
 
 ### Basic Usage:
@@ -283,11 +274,3 @@ Of course! Here are some general FAQ entries tailored for a tool/framework like 
 ---
 
 **ShapeAXI Team**: For further details, inquiries, or suggestions, feel free to [contact us](mailto:juan_prieto@med.unc.edu).
-
-
-
-##################----TEETH----##################
-import utils
-from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
-import nrrd
-#################################################
