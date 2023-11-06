@@ -50,7 +50,8 @@ For example, if you are using python 3.9 and CUDA 11.4,
 ```bash
 {YOURVERSION} = py38_cu114
 ```
-The first part is *py* and your python version. The second part is *cu* and your CUDA version without the point.
+The first part is *py* and your python version without the point.  
+The second part is *cu* and your CUDA version without the point.
 
 Finally, run this line by adding your editing {YOURVERSION}, 
 ```bash
