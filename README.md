@@ -45,8 +45,7 @@ Built on Tue_Mar__8_18:18:20_PST_2022
 Cuda compilation tools, release 11.6, V11.6.124
 Build cuda_11.6.r11.6/compiler.31057947_0
 ```
-Then, you have to edit {YOURVERSION} by using your python and CUDA version.
-For example, if you are using python 3.9 and CUDA 11.4, 
+Then, you have to edit {YOURVERSION} by using your python and CUDA version.  For example, if you are using python 3.9 and CUDA 11.4, 
 ```bash
 {YOURVERSION} = 38_cu114
 ```
