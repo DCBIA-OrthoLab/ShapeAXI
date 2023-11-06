@@ -24,22 +24,36 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 
 ## Installation
 
-First you have to create a __conda__ environment and activate it:
-- Python 3.8, 3.9 or 3.10
+### Installation of shapeaxi
 ```bash
-conda create --name "your_new_environment" python=3.X
-conda activate "your_new_environment"
+pip install shapeaxi
 ```
-(replace the X with 8,9 or 10 for the python version you want)    
 
 ### Installation of pytorch3d 
 
-Run these lines, 
+For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
+- First, you need to know your python version (3.8, 3.9)
+- Second, you need to know your CUDA version with this command line :
 ```bash
-conda install pytorch=1.13.0 torchvision pytorch-cuda=11.6 -c pytorch -c nvidia
-conda install -c fvcore -c iopath -c conda-forge fvcore iopath
-conda install -c bottler nvidiacub
-conda install pytorch3d=0.7.4 -c pytorch3d
+nvcc --version
+```
+It will print something like this : 
+```bash
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2022 NVIDIA Corporation
+Built on Tue_Mar__8_18:18:20_PST_2022
+Cuda compilation tools, release 11.6, V11.6.124
+Build cuda_11.6.r11.6/compiler.31057947_0
+```
+Then, you have to edit {YOURVERSION} by using your python and CUDA version. For example, if you are using python 3.9 and CUDA 11.4, 
+```bash
+{YOURVERSION} = 38_cu114
+```
+The first number is yout python version and then, the secon is your CUDA version without the point.
+
+Finally, run this line by adding your editing {YOURVERSION}, 
+```bash
+pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py{YOURVERSION}_pyt1110/download.html
 ```
 
 Finally, check the installation,
