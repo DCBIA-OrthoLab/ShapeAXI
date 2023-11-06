@@ -48,13 +48,13 @@ Build cuda_11.6.r11.6/compiler.31057947_0
 Then, you have to edit {YOURVERSION} by using your python and CUDA version.       
 For example, if you are using python 3.9 and CUDA 11.4, 
 ```bash
-{YOURVERSION} = 38_cu114
+{YOURVERSION} = py38_cu114
 ```
-The first number is your python version and then, the secon is your CUDA version without the point.
+The first part is *py* and your python version. The second part is *cu* and your CUDA version without the point.
 
 Finally, run this line by adding your editing {YOURVERSION}, 
 ```bash
-pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py{YOURVERSION}_pyt1110/download.html
+pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{YOURVERSION}_pyt1110/download.html
 ```
 
 Finally, check the installation,
