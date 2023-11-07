@@ -32,7 +32,10 @@ pip install shapeaxi
 ### Installation of pytorch3d 
 
 For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
-- First, you need to know your python version (3.8, 3.9)
+- First, you need to know your python version (3.8, 3.9) using :
+```bash
+python --version
+```
 - Second, you need to know your CUDA version with this command line :
 ```bash
 nvcc --version
@@ -61,15 +64,6 @@ pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.co
 Finally, check the installation,
 ```bash
 pip show pytorch3d
-```
-
-### Requirements:
-
-```bash
-# Command to install ShapeAXI
-git clone https://github.com/DCBIA-OrthoLab/ShapeAXI.git
-cd ShapeAXI
-pip install -r requirements.txt
 ```
 
 ## Usage
