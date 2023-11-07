@@ -32,7 +32,10 @@ pip install shapeaxi
 ### Installation of pytorch3d 
 
 For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
-- First, you need to know your python version (3.8, 3.9)
+- First, you need to know your python version (3.8, 3.9) using :
+```bash
+python --version
+```
 - Second, you need to know your CUDA version with this command line :
 ```bash
 nvcc --version
