@@ -9,9 +9,9 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from src.saxi_dataset import SaxiDataset
-from src.saxi_transforms import TrainTransform, EvalTransform
-import src.saxi_nets as saxi_nets
+from saxi_dataset import SaxiDataset
+from saxi_transforms import TrainTransform, EvalTransform
+import saxi_nets
 
 from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
@@ -29,17 +29,20 @@ import src.post_process as psp
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
+# Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done
+
 def main(args):
     
     fname = os.path.basename(args.csv_test)    
     ext = os.path.splitext(fname)[1]
 
+    # Read of the test data from a CSV or Parquet file
     if ext == ".csv":
         df_test = pd.read_csv(args.csv_test)
     else:
         df_test = pd.read_parquet(args.csv_test)
 
-
+    # The dataset and corresponding data loader are initialized for evaluation purposes.
     test_ds = SaxiDataset(df_test, transform=EvalTransform(), **vars(args))
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
@@ -75,7 +78,7 @@ def main(args):
         os.makedirs(out_dir)
 
     for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
-        
+        # The generated CAM is processed and added to the input surface mesh (surf) as a point data array
         V = V.cuda(non_blocking=True)
         F = F.cuda(non_blocking=True)
         CN = CN.cuda(non_blocking=True)
@@ -104,6 +107,7 @@ def main(args):
         V_gcam.SetName(array_name)
         surf.GetPointData().AddArray(V_gcam)
 
+        # Median filtering is applied to smooth the CAM on the surface
         psp.MedianFilter(surf, V_gcam)
 
         surf_path = df_test.loc[idx][args.surf_column]
@@ -137,6 +141,7 @@ def main(args):
         # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
         
+        # The video is generated with a specified frames-per-second rate
         out = cv2.VideoWriter(out_vid_path, fourcc, args.fps, (256, 256))
 
         for v, g in zip(vid_np, gcam_np):
@@ -148,7 +153,7 @@ def main(args):
 
 
 def get_argparse():
-
+    # The arguments are defined for the script 
     parser = argparse.ArgumentParser(description='Saxi GradCam')
 
     input_group = parser.add_argument_group('Input')

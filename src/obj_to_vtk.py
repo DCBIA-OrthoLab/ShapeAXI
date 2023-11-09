@@ -7,10 +7,11 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 from tqdm import tqdm
 from pathlib import Path
 import sys
-import src.utils as utils
+import utils
 import argparse
 
 def main(args):
+    #Main function to convert OBJ files to VTK and add the label information to each VTK file
     csv_path = args.csv
     output_dir = args.out
     vtk_output_dir = os.path.join(output_dir, "teeth-grand_challenge_vtk")  # Folder for VTK files
@@ -54,7 +55,7 @@ def main(args):
         surf.GetPointData().AddArray(vertex_instances_vtk)
 
         file_basename = Path(surf_path).stem
-        out_path = os.path.join(vtk_output_dir, f'{file_basename}.vtk')  # Updated path
+        out_path = os.path.join(vtk_output_dir, f'{file_basename}.vtk') # Updated path
 
         # Add the data to the list
         all_data.append({'surf': out_path, 'label': label_path, 'split': split})
@@ -67,6 +68,7 @@ def main(args):
     vtk_paths_df.to_csv(os.path.join(output_dir, f'{os.path.splitext(args.csv)[0]}_vtk.csv'), index=False)
 
 def get_argparse():
+    # Function to parse the arguments
     parser = argparse.ArgumentParser(description='Teeth challenge convert OBJ files to VTK. It adds the label information to each VTK file')
     parser.add_argument('--csv', help='CSV with columns surf,label,split', type=str, required=True)
     parser.add_argument('--out', help='Output directory', type=str, default="./")

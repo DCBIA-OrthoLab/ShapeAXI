@@ -10,12 +10,12 @@ import numpy as np
 import pickle 
 
 
-import src.compute_min_scale as compute_min_scale
-import src.split_train_eval as split_train_eval
-import src.saxi_eval as saxi_eval
-import src.saxi_gradcam as saxi_gradcam
-import src.saxi_train as saxi_train
-import src.saxi_predict as saxi_predict
+import compute_min_scale
+import split_train_eval
+import saxi_eval
+import saxi_gradcam
+import saxi_train
+import saxi_predict
 
 class bcolors:
     HEADER = '\033[95m'
@@ -34,6 +34,7 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 def get_last_checkpoint(checkpoint_dir):
+    # Get the last checkpoint
     checkpoint_paths = os.path.join(checkpoint_dir, '*.ckpt')
     checkpoint_paths = sorted(glob.iglob(checkpoint_paths), key=os.path.getctime, reverse=True) 
     if len(checkpoint_paths) > 0:
@@ -41,11 +42,13 @@ def get_last_checkpoint(checkpoint_dir):
     return None
 
 def get_val_loss(checkpoint_path):
+    # Get the last checkpoint
     checkpoint_fn = os.path.basename(checkpoint_path)
     checkpoint_dict = eval('dict(%s)' % checkpoint_fn.replace('-',',').replace(' ','').replace('.ckpt', ''))
     return checkpoint_dict['val_loss']
 
 def get_best_checkpoint(checkpoint_dir):
+    # Get the last checkpoint
     checkpoint_paths = os.path.join(checkpoint_dir, '*.ckpt')
     checkpoint_paths = sorted(glob.iglob(checkpoint_paths), key=get_val_loss) 
     if len(checkpoint_paths) > 0:
@@ -53,6 +56,7 @@ def get_best_checkpoint(checkpoint_dir):
     return None
 
 def get_argparse_dict(parser):
+    # Get the default arguments from the parser
     default = {}
     for action in parser._actions:
         if action.dest != "help":
@@ -62,8 +66,7 @@ def get_argparse_dict(parser):
 
 
 def main(args, arg_groups):
-
-    # Split the input CSV into the number of folds
+    # Main function
     create_folds = False
     scale_factor = None
 
@@ -71,7 +74,7 @@ def main(args, arg_groups):
         os.makedirs(args.out)
 
     if args.compute_scale_factor:
-
+        # Compute the scale factor for the dataset
         compute_min_scale_args_out = os.path.basename(args.csv)
 
         ext = os.path.splitext(compute_min_scale_args_out)[1]        
@@ -79,10 +82,12 @@ def main(args, arg_groups):
         compute_min_scale_args_out = os.path.join(args.out, compute_min_scale_args_out)
 
         if os.path.exists(compute_min_scale_args_out):
+            # If the scale factor has already been computed, load it
             df_scale = pd.read_csv(compute_min_scale_args_out)
             scale_factor = np.min(df_scale['surf_scale'])
 
         else:
+            # Compute the scale factor
             compute_min_scale_args = get_argparse_dict(compute_min_scale.get_argparse())
             compute_min_scale_args['csv'] = args.csv
             compute_min_scale_args['surf_column'] = args.surf_column
@@ -92,7 +97,7 @@ def main(args, arg_groups):
             scale_factor = compute_min_scale.main(compute_min_scale_args)
 
     for f in range(args.folds):
-
+        #Check if the folds already exist and if there are train, val and test dataset inside
         ext = os.path.splitext(args.csv)[1]
         csv_train = args.csv.replace(ext, 'fold{f}_train_train.csv').format(f=f)
         csv_valid = args.csv.replace(ext, 'fold{f}_train_test.csv').format(f=f)
@@ -102,7 +107,10 @@ def main(args, arg_groups):
             create_folds = True
             break
 
+#########################################################################SPLIT PART#####################################################################################################
+    
     if create_folds:
+        #Create the folds if they do not exist yet
         print(bcolors.INFO, "Creating folds...", bcolors.ENDC)
         split_csv_args = get_argparse_dict(split_train_eval.get_argparse())
         split_csv_args['csv'] = args.csv
@@ -112,9 +120,8 @@ def main(args, arg_groups):
         split_train_eval.main(split_csv_args)
 
         for f in range(args.folds):
-
+            # Use of split_train_eval to split the train into train and validation
             csv_train = args.csv.replace(ext, 'fold{f}_train.csv').format(f=f)
-
             split_csv_args = get_argparse_dict(split_train_eval.get_argparse())
 
             for k in arg_groups['Split']:
@@ -129,7 +136,7 @@ def main(args, arg_groups):
 
 
     for f in range(0, args.folds):
-
+        #Train the model for each fold
         print(bcolors.INFO, "Start training for fold {f}".format(f=f), bcolors.ENDC)
         ext = os.path.splitext(args.csv)[1]
         csv_train = args.csv.replace(ext, 'fold{f}_train_train.csv').format(f=f)
@@ -160,17 +167,15 @@ def main(args, arg_groups):
 
         print(bcolors.SUCCESS, "End training for fold {f}".format(f=f), bcolors.ENDC)
 
-    
+#########################################################################TEST PART#####################################################################################################
     for f in range(0, args.folds):
+        #Test the model for each fold
         ext = os.path.splitext(args.csv)[1]
         csv_test = args.csv.replace(ext, 'fold{f}_test.csv').format(f=f)
-
         saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
 
         print(bcolors.INFO, "Start test prediction for fold {f}".format(f=f), bcolors.ENDC)
-
         best_model_path = get_best_checkpoint(saxi_train_args_out)
-
         saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
         
         saxi_predict_args['csv'] = csv_test
@@ -182,33 +187,33 @@ def main(args, arg_groups):
         saxi_predict_args['out'] = os.path.join(args.out, 'test', 'fold{f}'.format(f=f))
 
         saxi_predict_args = Namespace(**saxi_predict_args)
-
         fname = os.path.basename(csv_test)
         out_prediction = os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
-    
-        # if not os.path.exists(out_prediction):
-        saxi_predict.main(saxi_predict_args)
-
+        if not os.path.exists(out_prediction):
+            saxi_predict.main(saxi_predict_args)
         print(bcolors.SUCCESS, "End test prediction for fold {f}".format(f=f), bcolors.ENDC)
 
+#########################################################################EVALUATION PART#####################################################################################################
 
+        #Run the evaluation for the prediction
         print(bcolors.INFO, "Start evaluation for fold {f}".format(f=f), bcolors.ENDC)
-
         saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
 
         saxi_eval_args['csv'] = out_prediction
         saxi_eval_args['csv_true_column'] = args.class_column
         saxi_eval_args['nn'] = args.nn
-
         saxi_eval_args = Namespace(**saxi_eval_args)
 
         saxi_eval.main(saxi_eval_args)
-
         print(bcolors.SUCCESS, "End evaluation prediction for fold {f}".format(f=f), bcolors.ENDC)
+
+#########################################################################AGGREGATE PART#####################################################################################################
     
     if args.nn == "SaxiSegmentation":
+        # No need to aggregate the predictions for segmentation
         sys.exit(0)
 
+    print(bcolors.INFO, "Start aggregate for fold {f}".format(f=f), bcolors.ENDC)
     if args.nn == "SaxiClassification":
         # Create a single dataframe and prob array
         out_prediction_agg = []
@@ -228,6 +233,7 @@ def main(args, arg_groups):
 
             probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
             out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
+            
         # Concatenate all datragrames and probs
         out_prediction_agg = pd.concat(out_prediction_agg)
         fname = os.path.basename(args.csv)
@@ -275,7 +281,8 @@ def main(args, arg_groups):
 
     print(bcolors.SUCCESS, "END aggregate prediction for ALL folds", bcolors.ENDC)
 
-        
+
+#########################################################################EXPLAINABILITY PART#####################################################################################################      
 
     for f in range(0, args.folds):
         print(bcolors.SUCCESS, "Start explainability for fold {f}".format(f=f), bcolors.ENDC)
@@ -323,19 +330,23 @@ def main(args, arg_groups):
 
         print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
 
-        
+
+############################################################################################################################################################################################################
+
+
 
 def cml():
+    # Command line interface
     parser = argparse.ArgumentParser(description='Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability')
 
+    # Arguments used for split the data into the different folds
     split_group = parser.add_argument_group('Split')
-
     split_group.add_argument('--csv', help='CSV with columns surf,class', type=str, required=True)
-    split_group.add_argument('--folds', help='Number of folds', type=int, default=2)
+    split_group.add_argument('--folds', help='Number of folds', type=int, default=5)
     split_group.add_argument('--valid_split', help='Number of folds', type=float, default=0.2)
     split_group.add_argument('--group_by', help='GroupBy criteria in the CSV. For example, SubjectID in case the same subjects has multiple timepoints/data points and the subject must belong to the same data split', type=str, default=None)
 
-
+    # Arguments used for training
     train_group = parser.add_argument_group('Train')
     train_group.add_argument('--nn', help='Type of neural network for training', type=str, default="SaxiClassification")
     train_group.add_argument('--csv_train', help='CSV with column surf', type=str)
@@ -357,7 +368,7 @@ def cml():
     train_group.add_argument('--subdivision_level', help='Subdivision level for icosahedron', type=int, default=1)
     train_group.add_argument('--image_size', help='Image resolution size', type=float, default=256)
     train_group.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='Learning rate')
-    train_group.add_argument('--epochs', help='Max number of epochs', type=int, default=2)   
+    train_group.add_argument('--epochs', help='Max number of epochs', type=int, default=200)   
     train_group.add_argument('--batch_size', help='Batch size', type=int, default=6)    
     train_group.add_argument('--patience', help='Patience for early stopping', type=int, default=30)
     train_group.add_argument('--log_every_n_steps', help='Log every n steps', type=int, default=10)    
@@ -366,10 +377,12 @@ def cml():
     train_group.add_argument('--neptune_project', help='Neptune project', type=str, default=None)
     train_group.add_argument('--neptune_tags', help='Neptune tags', type=str, default=None)
 
+    # Arguments used for explainability
     explain_group = parser.add_argument_group('Explainability group')
     explain_group.add_argument('--target_layer', help='Target layer for explainability', type=str, default='layer4')
     explain_group.add_argument('--fps', help='Frames per second', type=int, default=24) 
 
+    # Arguments used for evaluation
     out_group = parser.add_argument_group('Output')
     out_group.add_argument('--out', help='Output', type=str, default="./")
 

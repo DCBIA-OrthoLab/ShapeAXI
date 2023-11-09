@@ -5,7 +5,9 @@ import sys
 import os
 import math
 from collections import namedtuple
-from src.utils import * 
+from utils import * 
+
+# Command-line tool for processing and manipulating 3D surface mesh data using VTK library.
 
 def ChangeLabel(vtkdata, label_array, label2change, change):
 	# Set all the label 'label2change' in 'change'
@@ -402,6 +404,7 @@ def Threshold(vtkdata, labels, threshold_min, threshold_max, invert=False):
 	return geometry.GetOutput()
 
 if __name__ == '__main__':
+	# Parse arguments
 	parser = argparse.ArgumentParser(description='Predict an input with a trained neural network', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 	parser.add_argument('--surf', type=str, help='Input surface mesh to label', required=True)
 	parser.add_argument('--remove_islands', type=bool, help='Remove islands from mesh by labeling with the closes one', default=False)

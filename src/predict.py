@@ -308,7 +308,6 @@ def ConvertFDI(surf):
 
 
 if __name__ == '__main__':
-
   parser = argparse.ArgumentParser(description='Choose a .vtk file.')
   parser.add_argument('--surf',type=str, help='Input. Either .vtk file or folder containing vtk files.', required=True)
   parser.add_argument('--out',type=str,help ='Name of output file is input is a single file, or name of output folder if input is a folder.',required=True)

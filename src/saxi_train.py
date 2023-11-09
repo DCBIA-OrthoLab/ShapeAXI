@@ -10,11 +10,11 @@ import numpy as np
 
 import torch
 
-from src.saxi_dataset import SaxiDataModule, RandomRemoveTeethTransform, UnitSurfTransform, SaxiDataset
-from src.saxi_transforms import TrainTransform, EvalTransform
-import src.saxi_nets as saxi_nets
-from src.saxi_nets import MonaiUNet
-from src.saxi_logger import SaxiImageLogger, TeethNetImageLogger
+from saxi_dataset import SaxiDataModule, SaxiDataset
+from saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, UnitSurfTransform2
+import saxi_nets
+from saxi_nets import MonaiUNet
+from saxi_logger import SaxiImageLogger, TeethNetImageLogger
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -25,6 +25,7 @@ from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger
 from sklearn.utils import class_weight
 from pl_bolts.models.self_supervised import Moco_v2
 
+# Training machine learning models
 
 def main(args):
 
@@ -43,6 +44,7 @@ def main(args):
     saxi_args = vars(args)
 
     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
+        #Initialize the dataset and corresponding data loader for training and validation
         early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
         callbacks = [early_stop_callback, checkpoint_callback]
 
@@ -56,6 +58,7 @@ def main(args):
                             train_transform = TrainTransform(scale_factor=args.scale_factor),
                             valid_transform = EvalTransform(scale_factor=args.scale_factor),
                             test_transform = EvalTransform(scale_factor=args.scale_factor))
+        
         logger=None
         if args.tb_dir:
             logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
@@ -98,6 +101,7 @@ def main(args):
 
 
     elif args.nn == "SaxiSegmentation":
+        # The dataset and corresponding data loader are initialized for training and validation
         class_weights = None
 
         saxi_data = SaxiDataModule(df_train, df_val, df_test,
@@ -108,25 +112,20 @@ def main(args):
                             surf_column = 'surf',
                             surf_property = 'UniversalID',
                             #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
-                            train_transform = UnitSurfTransform(),
-                            valid_transform = UnitSurfTransform(),
-                            test_transform = UnitSurfTransform())
+                            train_transform = UnitSurfTransform2(),
+                            valid_transform = UnitSurfTransform2(),
+                            test_transform = UnitSurfTransform2())
 
         early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
-        
         logger=None
         
         if args.tb_dir:
             logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
 
         image_logger = TeethNetImageLogger()
-
         model = MonaiUNet(args, out_channels = 34, class_weights=class_weights, image_size=320, train_sphere_samples=args.train_sphere_samples)
 
-        trainer = Trainer(
-            logger=logger,
-            max_epochs=args.epochs,
-            log_every_n_steps=args.log_every_n_steps,
+        trainer = Trainer(logger=logger,max_epochs=args.epochs,log_every_n_steps=args.log_every_n_steps,
             callbacks=[early_stop_callback, checkpoint_callback, image_logger],
             devices=torch.cuda.device_count(), 
             accelerator="gpu", 
@@ -142,6 +141,7 @@ def main(args):
 
 
 def get_argparse():
+    # This function defines the arguments that can be passed to the script
     parser = argparse.ArgumentParser(description='Shape Analysis Explainability and Interpretability')
 
     in_group = parser.add_argument_group('Input')

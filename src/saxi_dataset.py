@@ -23,17 +23,18 @@ else:
   code_path = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[:-1])
 sys.path.append(code_path)
 
-import src.utils as utils
-import src.post_process as post_process
+import utils
+import post_process
 
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
 
 
-# Explanation : file which manages the dataset for saxi
+#File which manages the dataset for saxi
 
 class SaxiDataset(Dataset):
-
+    #This class is designed to make it easier to work with 3D surface data stored in files
+    #It provides methods for loading and preprocessing the data and allows for flexible configurations depending on the specific use case
     def __init__(self, df, mount_point="./", transform=None, surf_column="surf", surf_property=None, class_column=None, scalar_column=None, **kwargs):
         self.df = df
         self.mount_point = mount_point
@@ -46,6 +47,7 @@ class SaxiDataset(Dataset):
         return len(self.df.index)
 
     def __getitem__(self, idx):
+        #Get item function for the dataset
         surf = self.getSurf(idx)
 
         if self.transform:
@@ -53,10 +55,10 @@ class SaxiDataset(Dataset):
     
         surf = utils.ComputeNormals(surf)
         color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
-        verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
-        faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
         # verts = utils.PolyDataToTensors(surf)[0]
         # faces = utils.PolyDataToTensors(surf)[1]
+        verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
+        faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
 
         if self.surf_property:            
             faces_pid0 = faces[:,0:1]
@@ -79,6 +81,7 @@ class SaxiDataset(Dataset):
 
 
 class SaxiDataModule(pl.LightningDataModule):
+    #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
     def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column='Classification', model='SaxiClassification', surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
         super().__init__()
 
@@ -99,7 +102,6 @@ class SaxiDataModule(pl.LightningDataModule):
         self.model = model
 
     def setup(self, stage=None):
-
         # Assign train/val datasets for use in dataloaders
         self.train_ds = SaxiDataset(self.df_train, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.train_transform)
         self.val_ds = SaxiDataset(self.df_val, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.valid_transform)
@@ -110,11 +112,12 @@ class SaxiDataModule(pl.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(self.val_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
+
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
 
     def pad_verts_faces(self, batch):
-
+        # Collate function for the dataloader to know how to comine the data
         if self.model == 'SaxiClassification' or self.model == 'SaxiRegression':
             verts = [v for v, f, cn, l in batch]
             faces = [f for v, f, cn, l in batch]        
@@ -142,49 +145,9 @@ class SaxiDataModule(pl.LightningDataModule):
             return verts, faces, verts_data_faces, color_normals
 
 
-
-class UnitSurfTransform:
-
-    def __init__(self, random_rotation=False):
-        
-        self.random_rotation = random_rotation
-
-    def __call__(self, surf):
-
-        surf = utils.GetUnitSurf(surf)
-        if self.random_rotation:
-            surf, _a, _v = utils.RandomRotation(surf)
-        return surf
-
-
-class RandomRemoveTeethTransform:
-    def __init__(self, surf_property = None, random_rotation=False, max_remove=4):
-
-        self.surf_property = surf_property
-        self.random_rotation = random_rotation
-        self.max_remove = max_remove
-
-    def __call__(self, surf):
-
-        surf = utils.GetUnitSurf(surf)
-        
-        if self.random_rotation:
-            surf, _a, _v = utils.RandomRotation(surf)
-
-        if self.surf_property:
-            surf_point_data = surf.GetPointData().GetScalars(self.surf_property)
-            # ## Remove crown
-            unique, counts  = np.unique(surf_point_data, return_counts = True)
-
-            for i in range(self.max_remove):        
-                id_to_remove = np.random.choice(unique[:-1])            
-                if id_to_remove not in [1,16,17,32] and np.random.rand() > 0.5:
-                    surf = post_process.Threshold(surf, self.surf_property ,id_to_remove-0.5,id_to_remove+0.5, invert=True)        
-            return surf
-
-
-
 class SaxiTimepointsDataset(Dataset):
+    # It is designed to handle time series data, where each time point represents 3D surface data.
+    # It provides methods for loading and preprocessing the data for individual time points, allowing for flexible configurations depending on the specific use case, such as handling different surface properties or class labels.
     def __init__(self, df, mount_point = "./", transform=None, surf_column="surf", surf_property=None, class_column=None, scalar_column=None, **kwargs):
         self.df = df
         self.mount_point = mount_point
@@ -197,7 +160,7 @@ class SaxiTimepointsDataset(Dataset):
         return len(self.df.index)
 
     def __getitem__(self, idx):
-        
+        # Get specific item function for the dataset
         surf = self.getSurf(idx)
 
         if self.transform:
@@ -209,6 +172,7 @@ class SaxiTimepointsDataset(Dataset):
         # faces = utils.PolyDataToTensors(surf)[1]
         verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
         faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
+
 
         if self.surf_property:            
 
@@ -229,5 +193,6 @@ class SaxiTimepointsDataset(Dataset):
         return verts, faces, color_normals
 
     def getSurf(self, idx):
+        # Load the 3D data surface
         surf_path = f'{self.mount_point}/{self.df.iloc[idx][self.surf_column]}'
         return utils.ReadSurf(surf_path)

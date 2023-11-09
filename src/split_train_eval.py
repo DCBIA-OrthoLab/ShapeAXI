@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np 
 from sklearn.model_selection import train_test_split
 
+# Split the initial dataset into training, validation and test subsets for each fold
+
 def main(args):
     fname = args.csv
 
@@ -21,9 +23,10 @@ def main(args):
 
 
     if args.group_by:
-
+        # If there is a column to group by, split the data based on the values of this column
         if args.csv_split:
             group_ids = df_split[args.group_by]
+            
         else:
             group_ids = df[args.group_by].unique()
             np.random.shuffle(group_ids)
@@ -31,40 +34,37 @@ def main(args):
         samples = int(len(group_ids)*split)
 
         if args.folds == 0:
-
+            # Split the data into train and eval if there is just one fold
             id_test = group_ids[0:samples]
             id_train = group_ids[samples:]
-
-
             df_train = df[df[args.group_by].isin(id_train)]
             df_test = df[df[args.group_by].isin(id_test)]
 
             if(os.path.splitext(fname)[1] == ".csv"):
+                # Save the data into CSV files
                 if split > 0:
                     train_fn = fname.replace('.csv', '_train.csv')
                     df_train.to_csv(train_fn, index=False)
-
                     eval_fn = fname.replace('.csv', '_test.csv')
                     df_test.to_csv(eval_fn, index=False)
+
                 else:
-                    
                     split_fn = fname.replace('.csv', '_split.csv')
                     df_train.to_csv(split_fn, index=False)
+
             else:
                 if split > 0:
                     train_fn = fname.replace('.parquet', '_train.parquet')
                     df_train.to_parquet(train_fn, index=False)
-
                     eval_fn = fname.replace('.parquet', '_test.parquet')
                     df_test.to_parquet(eval_fn, index=False)
+
                 else:
-                    
                     split_fn = fname.replace('.parquet', '_split.parquet')
                     df_train.to_parquet(split_fn, index=False)
 
-
         else:
-
+            # Split the data into train and eval for each fold
             start_f = 0
             end_f = samples
             for i in range(args.folds):
@@ -87,73 +87,59 @@ def main(args):
                     eval_fn = fname.replace('.parquet', 'fold' + str(i) + '_test.parquet')
                     df_test.to_parquet(eval_fn, index=False)
 
-                
-
                 start_f += samples
                 end_f += samples
 
     else:
+        # If there is no column to group by, split the data randomly
         group_ids = np.array(range(len(df.index)))
-
         samples = int(len(group_ids)*split)
-
         np.random.shuffle(group_ids)
 
         if args.folds == 0:
 
             id_test = group_ids[0:samples]
             id_train = group_ids[samples:]
-
-
             df_train = df.iloc[id_train]
             df_test = df.iloc[id_test]
 
             if(os.path.splitext(fname)[1] == ".csv"):
                 if split > 0:
-
                     train_fn = fname.replace('.csv', '_train.csv')
                     df_train.to_csv(train_fn, index=False)
-
                     eval_fn = fname.replace('.csv', '_test.csv')
                     df_test.to_csv(eval_fn, index=False)
                 else:
-
                     split_fn = fname.replace('.csv', '_split.csv')
                     df_train.to_csv(split_fn, index=False)
             else:
                 if split > 0:
-
                     train_fn = fname.replace('.parquet', '_train.parquet')
                     df_train.to_parquet(train_fn, index=False)
-
                     eval_fn = fname.replace('.parquet', '_test.parquet')
                     df_test.to_parquet(eval_fn, index=False)
                 else:
-
                     split_fn = fname.replace('.parquet', '_split.parquet')
                     df_train.to_parquet(split_fn, index=False)
 
         else:
-
             start_f = 0
             end_f = samples
+
             for i in range(args.folds):
-
                 id_test = group_ids[start_f:end_f]
-
                 df_train = df[~df.index.isin(id_test)]
                 df_test = df.iloc[id_test]
 
                 if(os.path.splitext(fname)[1] == ".csv"):
                     train_fn = fname.replace('.csv', 'fold' + str(i) + '_train.csv')
                     df_train.to_csv(train_fn, index=False)
-
                     eval_fn = fname.replace('.csv', 'fold' + str(i) + '_test.csv')
                     df_test.to_csv(eval_fn, index=False)
+
                 else:
                     train_fn = fname.replace('.parquet', 'fold' + str(i) + '_train.parquet')
                     df_train.to_parquet(train_fn, index=False)
-
                     eval_fn = fname.replace('.parquet', 'fold' + str(i) + '_test.parquet')
                     df_test.to_parquet(eval_fn, index=False)
 
@@ -163,6 +149,7 @@ def main(args):
 
 
 def get_argparse():
+    # The arguments are defined for the script
     parser = argparse.ArgumentParser(description='Splits data into train/eval', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--csv', type=str, help='CSV file', required=True)
     parser.add_argument('--split', type=float, help='Split float [0-1]', default=0.0)

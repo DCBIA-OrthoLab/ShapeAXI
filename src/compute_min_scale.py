@@ -5,14 +5,13 @@ import os
 import pandas as pd
 import argparse
 import json
-import src.utils
+import utils
 from tqdm import tqdm
 
 def main(args):
+    # Read a CSV file, process its data to compute the minimum magnitude/scaling factor for all shapes, and save the results back to a CSV file
     surf_scales = []
-
     df = pd.read_csv(args.csv)
-
     pbar = tqdm(df.iterrows(), total=len(df))
 
     for idx, row in pbar:
@@ -36,6 +35,7 @@ def main(args):
     return min_scale
 
 def get_argparse():
+    # Parse the command line arguments
     parser = argparse.ArgumentParser(description='Computes the minimum magnitude/scaling factor for all shapes after centering each at 0.')
     parser.add_argument('--csv', type=str, help='CSV file with column surf', required=True)
     parser.add_argument('--surf_column', help='Surface column name', type=str, default="surf")

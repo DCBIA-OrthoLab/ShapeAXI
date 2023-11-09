@@ -10,7 +10,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import roc_curve, auc, roc_auc_score
 from sklearn.metrics import classification_report
 import pandas as pd
-import src.utils as utils
+import utils
 from vtk.util.numpy_support import vtk_to_numpy
 from sklearn.metrics import jaccard_score
 import seaborn as sns
@@ -25,15 +25,10 @@ import pickle
 import plotly.graph_objects as go
 import plotly.express as px
 
+# This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
-def plot_confusion_matrix(cm, classes,
-                            normalize=False,
-                            title='Confusion matrix',
-                            cmap=plt.cm.Blues):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
+def plot_confusion_matrix(cm, classes,normalize=False,title='Confusion matrix',cmap=plt.cm.Blues):
+    #This function prints and plots the confusion matrix. Normalization can be applied by setting `normalize=True`.
     if normalize:
         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
         print("Normalized confusion matrix, avg:", np.trace(cm)/len(classes))
@@ -62,7 +57,6 @@ def plot_confusion_matrix(cm, classes,
 
 
 def main(args):
-
   y_true_arr = [] 
   y_pred_arr = []
 
@@ -73,7 +67,8 @@ def main(args):
 
 
   if args.nn == "SaxiClassification":
-
+    # For the classification, evaluating a classification model, generating classification metrics, creating confusion matrix visualizations
+    # It also responsible for plotting ROC curves, aggregating and reporting classification metrics in a structured format
     if(args.csv_tag_column):
       class_names = df[[args.csv_tag_column, args.csv_prediction_column]].drop_duplicates()[args.csv_tag_column]
       class_names.sort()
@@ -168,7 +163,7 @@ def main(args):
       df_report.to_csv(report_filename)
   
   elif args.nn == "SaxiSegmentation":
-
+    # For the segmentation, evaluating a segmentation model, generating segmentation metrics, creating confusion matrix visualizations
     dice_arr = []
 
     df = pd.read_csv(args.csv)
@@ -297,6 +292,7 @@ def main(args):
 
 
   elif args.nn == "SaxiRegression":
+    #Visualization of the distribution of absolute errors and prediction errors
     y_true_arr = [] 
     y_pred_arr = []
 
@@ -323,6 +319,7 @@ def main(args):
 
 
 def get_argparse():
+  # Function to parse arguments for the evaluation script
   parser = argparse.ArgumentParser(description='Evaluate classification result', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
   parser.add_argument('--csv', type=str, help='csv file', required=True)
