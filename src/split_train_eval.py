@@ -152,7 +152,7 @@ def get_argparse():
     # The arguments are defined for the script
     parser = argparse.ArgumentParser(description='Splits data into train/eval', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--csv', type=str, help='CSV file', required=True)
-    parser.add_argument('--split', type=float, help='Split float [0-1]', default=0.0)
+    parser.add_argument('--split', type=float, help='Split float [0-1]', default=0.2)
     parser.add_argument('--group_by', type=str, help='Group the rows by column', default=None)
     parser.add_argument('--folds', type=int, help='Number of folds to generate', default=0)
     parser.add_argument('--csv_split', type=str, help='Split the data using the ids from this dataframe', default=None)
