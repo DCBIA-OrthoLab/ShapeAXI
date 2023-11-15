@@ -6,19 +6,7 @@ import os
 import sys
 import pandas as pd
 import numpy as np 
-
 import torch
-
-from saxi_dataset import SaxiDataModule, SaxiDataset
-from saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, UnitSurfTransform2, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-import saxi_nets
-from saxi_nets import MonaiUNet
-from saxi_logger import SaxiImageLogger, TeethNetImageLogger
-
-from net import IcoConvNet
-from data import BrainIBISDataModule
-from logger import ImageLogger
-
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -26,11 +14,178 @@ from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger
 import monai
 import nibabel as nib
-
 from sklearn.utils import class_weight
 from pl_bolts.models.self_supervised import Moco_v2
 
+
+from saxi_dataset import SaxiDataModule, SaxiDataset, BrainIBISDataModule
+from saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
+import saxi_nets
+from saxi_nets import MonaiUNet, SaxiIcoClassification
+from saxi_logger import SaxiImageLogger, TeethNetImageLogger, ImageLogger
+
 # Training machine learning models
+
+def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test):
+    #Initialize the dataset and corresponding data loader for training and validation
+    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
+    callbacks = [early_stop_callback, checkpoint_callback]
+    saxi_args = vars(args)
+
+    saxi_data = SaxiDataModule(df_train, df_val, df_test,
+                        mount_point = mount_point,
+                        batch_size = args.batch_size,
+                        num_workers = args.num_workers,
+                        model = args.nn,
+                        surf_column = args.surf_column,
+                        class_column = args.class_column,
+                        train_transform = TrainTransform(scale_factor=args.scale_factor),
+                        valid_transform = EvalTransform(scale_factor=args.scale_factor),
+                        test_transform = EvalTransform(scale_factor=args.scale_factor))
+    
+    logger=None
+    if args.tb_dir:
+        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
+        callbacks.append(SaxiImageLogger())
+
+    elif args.neptune_project:
+        logger = NeptuneLogger(
+            project=args.neptune_project,
+            tags=args.neptune_tags,
+            api_key=os.environ['NEPTUNE_API_TOKEN']
+        )
+        image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
+
+    if args.nn == "SaxiClassification":
+        unique_classes = np.sort(np.unique(df_train[args.class_column]))
+        unique_class_weights = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
+        class_weights = unique_class_weights
+        saxi_args['class_weights'] = class_weights
+        saxi_args['out_classes'] = len(class_weights)
+
+    elif args.nn =="SaxiRegression":
+        saxi_args['out_features'] = 1
+
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS(**saxi_args)
+
+    trainer = Trainer(
+        logger=logger,
+        max_epochs=args.epochs,
+        log_every_n_steps=args.log_every_n_steps,
+        callbacks=callbacks,
+        devices=torch.cuda.device_count(), 
+        accelerator="gpu", 
+        strategy=DDPStrategy(find_unused_parameters=False),
+        num_sanity_val_steps=0,
+        profiler=args.profiler
+    )
+
+    trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
+
+
+def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test):
+     # The dataset and corresponding data loader are initialized for training and validation
+    class_weights = None
+
+    saxi_data = SaxiDataModule(df_train, df_val, df_test,
+                        mount_point = mount_point,
+                        batch_size = args.batch_size,
+                        num_workers = args.num_workers,
+                        model = args.nn,
+                        surf_column = 'surf',
+                        surf_property = 'UniversalID',
+                        #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
+                        train_transform = UnitSurfTransform(),
+                        valid_transform = UnitSurfTransform(),
+                        test_transform = UnitSurfTransform())
+
+    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
+    logger=None
+    
+    if args.tb_dir:
+        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
+
+    image_logger = TeethNetImageLogger()
+    model = MonaiUNet(args, out_channels = 34, class_weights=class_weights, image_size=320, train_sphere_samples=args.train_sphere_samples)
+
+    trainer = Trainer(logger=logger,max_epochs=args.epochs,log_every_n_steps=args.log_every_n_steps,
+        callbacks=[early_stop_callback, checkpoint_callback, image_logger],
+        devices=torch.cuda.device_count(), 
+        accelerator="gpu", 
+        strategy=DDPStrategy(find_unused_parameters=False, process_group_backend="nccl"),
+        num_sanity_val_steps=0,
+        profiler=args.profiler
+    )
+
+    trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
+    trainer.test(datamodule=saxi_data)
+
+
+def SaxiIcoClassification_train(args):
+    list_path_ico = [args.path_ico_left,args.path_ico_right]
+
+    ###Demographics
+    list_demographic = ['Gender','MRI_Age','AmygdalaLeft','HippocampusLeft','LatVentsLeft','ICV','Crbm_totTissLeft','Cblm_totTissLeft','AmygdalaRight','HippocampusRight','LatVentsRight','Crbm_totTissRight','Cblm_totTissRight'] #MLR
+
+    ###Transformation
+    list_train_transform = [] 
+    list_train_transform.append(CenterTransform())
+    list_train_transform.append(NormalizePointTransform())
+    list_train_transform.append(RandomRotationTransform())        
+    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) # Don't use this transformation if your object isn't a sphere
+    list_train_transform.append(NormalizePointTransform()) # Don't use this transformation if your object isn't a sphere
+    train_transform = monai.transforms.Compose(list_train_transform)
+
+    list_val_and_test_transform = []    
+    list_val_and_test_transform.append(CenterTransform())
+    list_val_and_test_transform.append(NormalizePointTransform())
+    val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
+
+    ### Get number of images
+    list_nb_verts_ico = [12, 42, 162, 642, 2562, 10242, 40962, 163842]
+    nb_images = list_nb_verts_ico[args.ico_lvl-1]
+    
+    ### Creation of Dataset
+    brain_data = BrainIBISDataModule(args.batch_size,list_demographic,args.csv_train,args.csv_valid,args.csv_test,list_path_ico,train_transform = train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers)#MLR
+    nbr_features = brain_data.get_features()
+    weights = brain_data.get_weigths()
+    nbr_demographic = brain_data.get_nbr_demographic()
+
+    if args.ico_lvl == 1:
+        radius = 1.76 
+    elif args.ico_lvl == 2:
+        radius = 1
+
+    saxi_args = vars(args)
+    saxi_args['nbr_features'] = nbr_features
+    saxi_args['nbr_demographic'] = nbr_demographic
+    saxi_args['weights'] = weights
+    saxi_args['radius'] = radius
+
+    #Creation of our model
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS(**saxi_args)
+
+    #Creation of Checkpoint (if we want to save best models)
+    checkpoint_callback_loss = ModelCheckpoint(dirpath='../Checkpoint/'+args.name,filename='{epoch}-{val_loss:.2f}',save_top_k=10,monitor='val_loss',)
+
+    #Logger (Useful if we use Tensorboard)
+    logger = TensorBoardLogger(save_dir="test_tensorboard", name="my_model")
+
+    #Early Stopping
+    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=args.min_delta_early_stopping, patience=args.patience_early_stopping, verbose=True, mode="min")
+
+    #Image Logger (Useful if we use Tensorboard)
+    image_logger = ImageLogger(num_features = nbr_features,num_images = nb_images,mean = 0,std=args.noise_lvl)
+
+    ###Trainer
+    trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=[early_stop_callback,checkpoint_callback_loss,image_logger],accelerator="gpu") #,accelerator="gpu"
+    trainer.fit(model,datamodule=brain_data)
+    trainer.test(model, datamodule=brain_data)
+
+    print('Number of features : ',nbr_features)
+
 
 def main(args):
 
@@ -46,166 +201,27 @@ def main(args):
     df_val = pd.read_csv(os.path.join(mount_point, args.csv_valid))
     df_test = pd.read_csv(os.path.join(mount_point, args.csv_valid))
 
-    saxi_args = vars(args)
-
     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
-        #Initialize the dataset and corresponding data loader for training and validation
-        early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
-        callbacks = [early_stop_callback, checkpoint_callback]
-
-        saxi_data = SaxiDataModule(df_train, df_val, df_test,
-                            mount_point = mount_point,
-                            batch_size = args.batch_size,
-                            num_workers = args.num_workers,
-                            model = args.nn,
-                            surf_column = args.surf_column,
-                            class_column = args.class_column,
-                            train_transform = TrainTransform(scale_factor=args.scale_factor),
-                            valid_transform = EvalTransform(scale_factor=args.scale_factor),
-                            test_transform = EvalTransform(scale_factor=args.scale_factor))
-        
-        logger=None
-        if args.tb_dir:
-            logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
-            callbacks.append(SaxiImageLogger())
-
-        elif args.neptune_project:
-            logger = NeptuneLogger(
-                project=args.neptune_project,
-                tags=args.neptune_tags,
-                api_key=os.environ['NEPTUNE_API_TOKEN']
-            )
-            image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
-        
-        if args.nn == "SaxiClassification":
-            unique_classes = np.sort(np.unique(df_train[args.class_column]))
-            unique_class_weights = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
-            class_weights = unique_class_weights
-            saxi_args['class_weights'] = class_weights
-            saxi_args['out_classes'] = len(class_weights)
-
-        elif args.nn =="SaxiRegression":
-            saxi_args['out_features'] = 1
-
-        SAXINETS = getattr(saxi_nets, args.nn)
-        model = SAXINETS(**saxi_args)
-
-        trainer = Trainer(
-            logger=logger,
-            max_epochs=args.epochs,
-            log_every_n_steps=args.log_every_n_steps,
-            callbacks=callbacks,
-            devices=torch.cuda.device_count(), 
-            accelerator="gpu", 
-            strategy=DDPStrategy(find_unused_parameters=False),
-            num_sanity_val_steps=0,
-            profiler=args.profiler
-        )
-
-        trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
+        SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test)
 
     elif args.nn == "SaxiSegmentation":
-        # The dataset and corresponding data loader are initialized for training and validation
-        class_weights = None
-
-        saxi_data = SaxiDataModule(df_train, df_val, df_test,
-                            mount_point = mount_point,
-                            batch_size = args.batch_size,
-                            num_workers = args.num_workers,
-                            model = args.nn,
-                            surf_column = 'surf',
-                            surf_property = 'UniversalID',
-                            #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
-                            train_transform = UnitSurfTransform2(),
-                            valid_transform = UnitSurfTransform2(),
-                            test_transform = UnitSurfTransform2())
-
-        early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
-        logger=None
-        
-        if args.tb_dir:
-            logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
-
-        image_logger = TeethNetImageLogger()
-        model = MonaiUNet(args, out_channels = 34, class_weights=class_weights, image_size=320, train_sphere_samples=args.train_sphere_samples)
-
-        trainer = Trainer(logger=logger,max_epochs=args.epochs,log_every_n_steps=args.log_every_n_steps,
-            callbacks=[early_stop_callback, checkpoint_callback, image_logger],
-            devices=torch.cuda.device_count(), 
-            accelerator="gpu", 
-            strategy=DDPStrategy(find_unused_parameters=False, process_group_backend="nccl"),
-            num_sanity_val_steps=0,
-            profiler=args.profiler
-        )
-
-        trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
-        trainer.test(datamodule=saxi_data)
+        SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test)
     
-    elif args.nn == "IcoConv":
-        list_path_ico = [args.path_ico_left,args.path_ico_right]
-
-        ###Demographics
-        list_demographic = ['Gender','MRI_Age','AmygdalaLeft','HippocampusLeft','LatVentsLeft','ICV','Crbm_totTissLeft','Cblm_totTissLeft','AmygdalaRight','HippocampusRight','LatVentsRight','Crbm_totTissRight','Cblm_totTissRight'] #MLR
-
-        ###Transformation
-        list_train_transform = [] 
-        list_train_transform.append(CenterTransform())
-        list_train_transform.append(NormalizePointTransform())
-        list_train_transform.append(RandomRotationTransform())        
-        list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) # Don't use this transformation if your object isn't a sphere
-        list_train_transform.append(NormalizePointTransform()) # Don't use this transformation if your object isn't a sphere
-        train_transform = monai.transforms.Compose(list_train_transform)
-
-        list_val_and_test_transform = []    
-        list_val_and_test_transform.append(CenterTransform())
-        list_val_and_test_transform.append(NormalizePointTransform())
-        val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
-
-        ### Get number of images
-        list_nb_verts_ico = [12, 42, 162, 642, 2562, 10242, 40962, 163842]
-        nb_images = list_nb_verts_ico[args.ico_lvl-1]
-        
-        ### Creation of Dataset
-        brain_data = BrainIBISDataModule(args.batch_size,list_demographic,args.path_data,args.csv_train,args.csv_val,args.csv_testr,list_path_ico,train_transform = train_transform,val_and_test_transform =val_and_test_transform,num_workers=args.num_workers)#MLR
-        nbr_features = brain_data.get_features()
-        weights = brain_data.get_weigths()
-        nbr_demographic = brain_data.get_nbr_demographic()
-
-        if args.ico_lvl == 1:
-            radius = 1.76 
-        elif args.ico_lvl == 2:
-            radius = 1
-        #Creation of our model
-        model = IcoConvNet(args.layer,args.pretrained,nbr_features,nbr_demographic,args.dropout_lvl,args.image_size,args.noise_lvl,args.ico_lvl,args.batch_size,weights,radius=radius,lr=args.lr,name=args.name)#MLR
-
-        #Creation of Checkpoint (if we want to save best models)
-        checkpoint_callback_loss = ModelCheckpoint(dirpath='../Checkpoint/'+args.name,filename='{epoch}-{val_loss:.2f}',save_top_k=10,monitor='val_loss',)
-
-        #Logger (Useful if we use Tensorboard)
-        logger = TensorBoardLogger(save_dir="test_tensorboard", name="my_model")
-
-        #Early Stopping
-        early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=args.min_delta_early_stopping, patience=args.patience_early_stopping, verbose=True, mode="min")
-
-        #Image Logger (Useful if we use Tensorboard)
-        image_logger = ImageLogger(num_features = nbr_features,num_images = nb_images,mean = 0,std=args.noise_lvl)
-
-        ###Trainer
-        trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=[early_stop_callback,checkpoint_callback_loss,image_logger],accelerator="gpu") #,accelerator="gpu"
-        trainer.fit(model,datamodule=brain_data)
-        trainer.test(model, datamodule=brain_data)
-
-        print('Number of features : ',nbr_features)
+    elif args.nn == "SaxiIcoClassification":
+        SaxiIcoClassification_train(args)
+    
+    else:
+        raise ValueError ("Unknown neural network name: {}, choose between SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification".format(args.nn))
 
 
 
 
 def get_argparse():
-    # This function defines the arguments that can be passed to the script
+    #This function defines the arguments that can be passed to the script
     parser = argparse.ArgumentParser(description='Shape Analysis Explainability and Interpretability')
 
+    ##Input
     in_group = parser.add_argument_group('Input')
-    in_group.add_argument('--path_data', help='Path to data for icoconv', type=str, default=None)
     in_group.add_argument('--csv_train', help='CSV with column surf', type=str, required=True)    
     in_group.add_argument('--csv_valid', help='CSV with column surf', type=str)
     in_group.add_argument('--csv_test', help='CSV with column surf', type=str, required=True)        
@@ -213,14 +229,19 @@ def get_argparse():
     in_group.add_argument('--class_column', help='Class column name', type=str, default=None)
     in_group.add_argument('--mount_point', help='Dataset mount directory', type=str, default="./")
     in_group.add_argument('--num_workers', help='Number of workers for loading', type=int, default=4)
+    in_group.add_argument('--path_ico_left', type=str, default='./3DObject/sphere_f327680_v163842.vtk', help='Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)')
+    in_group.add_argument('--path_ico_right', type=str, default='./3DObject/sphere_f327680_v163842.vtk', help='Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)')
 
+    ##Model
     model_group = parser.add_argument_group('Input model')
     model_group.add_argument('--model', help='Model to continue training', type=str, default= None)
 
+    ##Hyperparameters
     hyper_group = parser.add_argument_group('Hyperparameters')
-    hyper_group.add_argument('--nn', help='Neural network name', type=str, default='SaxiClassification')
+    hyper_group.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', type=str, default='SaxiClassification')
     hyper_group.add_argument('--base_encoder', help='Base encoder for the feature extraction', type=str, default='resnet18')
-    hyper_group.add_argument('--base_encoder_params', help='Base encoder parameters that are passed to build the feature extraction', type=str, default='pretrained=False,n_input_channels=4,spatial_dims=2,num_classes=512')
+    hyper_group.add_argument('--base_encoder_params', help='Base encoder parameters that are passed to build the feature extraction', type=str, default='pretrained=False,n_input_channels=3,spatial_dims=2,num_classes=512')
+    # hyper_group.add_argument('--base_encoder_params', help='Base encoder parameters that are passed to build the feature extraction', type=str, default='pretrained=False,n_input_channels=4,num_classes=512')
     hyper_group.add_argument('--hidden_dim', help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', type=int, default=512)
     hyper_group.add_argument('--radius', help='Radius of icosphere', type=float, default=1.35)    
     hyper_group.add_argument('--subdivision_level', help='Subdivision level for icosahedron', type=int, default=1)
@@ -234,6 +255,7 @@ def get_argparse():
     hyper_group.add_argument('--noise_lvl', type=float, default=0.01, help='Noise level (default: 0.01)')
     hyper_group.add_argument('--ico_lvl', type=int, default=2, help='Ico level, minimum level is 1 (default: 2)')
     hyper_group.add_argument('--pretrained', type=bool, default=False, help='Pretrained (default: False)')
+    hyper_group.add_argument('--dropout_lvl', type=float, default=0.2, help='Dropout level (default: 0.2)')
 
     ##Gaussian Filter
     gaussian_group = parser.add_argument_group('Gaussian filter')
@@ -250,7 +272,7 @@ def get_argparse():
     name_group.add_argument('--layer', type=str, default='IcoConv2D', help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)")
     name_group.add_argument('--name', type=str, default='Experiment0', help='Name of your experiment (default: Experiment0)')
 
-
+    ##Logger
     logger_group = parser.add_argument_group('Logger')
     logger_group.add_argument('--log_every_n_steps', help='Log every n steps', type=int, default=10)    
     logger_group.add_argument('--tb_dir', help='Tensorboard output dir', type=str, default=None)
@@ -258,9 +280,11 @@ def get_argparse():
     logger_group.add_argument('--neptune_project', help='Neptune project', type=str, default=None)
     logger_group.add_argument('--neptune_tags', help='Neptune tags', type=str, default=None)
 
+    ##Output
     out_group = parser.add_argument_group('Output')
     out_group.add_argument('--out', help='Output', type=str, default="./")
 
+    ##Debug
     debug_group = parser.add_argument_group('Debug')
     debug_group.add_argument('--profiler', help='Use a profiler', type=str, default=None)
 

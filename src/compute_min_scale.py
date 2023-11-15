@@ -1,4 +1,3 @@
-
 import vtk
 import numpy as np 
 import os
@@ -8,8 +7,9 @@ import json
 import utils
 from tqdm import tqdm
 
+# This file reads a CSV file, process its data to compute the minimum magnitude/scaling factor for all shapes, and save the results back to a CSV file
+
 def main(args):
-    # Read a CSV file, process its data to compute the minimum magnitude/scaling factor for all shapes, and save the results back to a CSV file
     surf_scales = []
     df = pd.read_csv(args.csv)
     pbar = tqdm(df.iterrows(), total=len(df))

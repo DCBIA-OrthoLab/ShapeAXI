@@ -59,15 +59,12 @@ class SaxiImageLoggerNeptune(Callback):
                 grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 0:3, :, :])#Grab the first image, RGB channels only, X, Y. The time dimension is on dim=1
                 fig = plt.figure(figsize=(7, 9))
                 ax = plt.imshow(grid_X.permute(1, 2, 0).cpu().numpy())
-                # trainer.logger.experiment.add_image('img1', grid_img1.cpu().numpy(), 0)
                 trainer.logger.experiment["images/x"].upload(fig)
                 plt.close()
-
                 
                 grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 3:, :, :])#Grab the depth map. The time dimension is
                 fig = plt.figure(figsize=(7, 9))
                 ax = plt.imshow(grid_X.permute(1, 2, 0).cpu().numpy())
-                # trainer.logger.experiment.add_image('img1', grid_img1.cpu().numpy(), 0)
                 trainer.logger.experiment["images/x_depth"].upload(fig)
                 plt.close()
 
@@ -75,7 +72,9 @@ class SaxiImageLoggerNeptune(Callback):
 # SaxiImageLogger logs images directly within the PyTorch Lightning logging system.
 # SaxiImageLoggerNeptune sends images to the Neptune platform for more advanced experiment tracking and visualization. 
 
-#########################################################################SEGMENTATION PART#########################################################################################
+
+
+######################################################################### SEGMENTATION PART #########################################################################################
 
 
 class TeethNetImageLogger(Callback):
@@ -114,4 +113,54 @@ class TeethNetImageLogger(Callback):
                     trainer.logger.experiment.add_image('x', grid_x, pl_module.global_step)
 
                     grid_y = torchvision.utils.make_grid(y[0, 0:num_images, :, :, :]/pl_module.out_channels)# The time dimension here is swapped after the permute and is on dim=2. It will grab the first image
+                    grid_y = grid_y.cpu().numpy()
                     trainer.logger.experiment.add_image('Y', grid_y, pl_module.global_step)
+
+
+
+######################################################################### ICOCONV PART #########################################################################################
+
+
+class ImageLogger(Callback):
+    def __init__(self,num_features = 3 , num_images=12, log_steps=10,mean=0,std=0.015):
+        self.num_features = num_features
+        self.log_steps = log_steps
+        self.num_images = num_images
+        self.mean = mean
+        self.std = std
+
+    def grid_images(self,images):
+        grid_images = torchvision.utils.make_grid(images[0, 0:self.num_images, 0:self.num_features+1, :, :])
+        numpy_grid_images = grid_images.cpu().numpy()
+        return numpy_grid_images
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):        
+
+        if batch_idx % self.log_steps == 0:
+
+            VL, FL, VFL, FFL, VR, FR, VFR, FFR,demographics, Y = batch
+
+            VL = VL.to(pl_module.device,non_blocking=True)
+            FL = FL.to(pl_module.device,non_blocking=True)
+            VFL = VFL.to(pl_module.device,non_blocking=True)
+            FFL = FFL.to(pl_module.device,non_blocking=True)
+            VR = VR.to(pl_module.device,non_blocking=True)
+            FR = FR.to(pl_module.device,non_blocking=True)
+            VFR = VFR.to(pl_module.device,non_blocking=True)
+            FFR = FFR.to(pl_module.device,non_blocking=True)
+
+            with torch.no_grad():
+
+                images, PF = pl_module.render(VL, FL, VFL, FFL) 
+                ###Add because we only have 2 features      
+                t_zeros = torch.ones(images[:,:,:1].shape).to(pl_module.device,non_blocking=True)*(images[:,:,:1] > 0.0)
+
+                images = torch.cat([images,t_zeros],dim=2)     
+                numpy_grid_images = self.grid_images(images)
+                trainer.logger.experiment.add_image('Image features', numpy_grid_images, pl_module.global_step)
+
+                images_noiseM = pl_module.noise(images)
+                numpy_grid_images_noiseM = self.grid_images(images_noiseM)
+                trainer.logger.experiment.add_image('Image + noise M ', numpy_grid_images_noiseM, pl_module.global_step)    
+    
+

@@ -326,7 +326,7 @@ def get_argparse():
   parser.add_argument('--csv_true_column', type=str, help='Which column to do the stats on', default="class")
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', help='Neural network name for evaluation type', type=str, default='SaxiClassification')
+  parser.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', type=str, default='SaxiClassification')
   parser.add_argument('--title', type=str, help='Title for the image', default="Confusion matrix")
   parser.add_argument('--figsize', type=float, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default="UniversalID")

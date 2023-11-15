@@ -1,38 +1,35 @@
 import argparse
-
 import math
 import os
 import pandas as pd
 import numpy as np 
-
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad, HiResCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.image import show_cam_on_image
+import cv2
+import pickle
+from tqdm import tqdm
+import monai
+from monai.transforms import (    
+    ScaleIntensityRange
+)
+import post_process as psp
+import vtk
+from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
 from saxi_dataset import SaxiDataset
 from saxi_transforms import TrainTransform, EvalTransform
 import saxi_nets
 
-from pytorch_grad_cam import GradCAM, ScoreCAM, GradCAMPlusPlus, AblationCAM, XGradCAM, EigenCAM, FullGrad
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+# Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done.
+# Especially identify the parts of the picture which is the most important for the network to make a decision.
 
-import cv2
 
-import pickle
-from tqdm import tqdm
-
-from monai.transforms import (    
-    ScaleIntensityRange
-)
-
-import src.post_process as psp
-import vtk
-from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
-
-# Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done
-
-def main(args):
-    
+## Gradcam function for Regression and Classification model
+def Classification_Regression_gradcam(args):
     fname = os.path.basename(args.csv_test)    
     ext = os.path.splitext(fname)[1]
 
@@ -152,6 +149,11 @@ def main(args):
         out.release()
 
 
+def main(args):
+    if args.nn == 'SaxiClassification' or args.nn == 'SaxiRegression':
+        Classification_Regression_gradcam(args)
+
+
 def get_argparse():
     # The arguments are defined for the script 
     parser = argparse.ArgumentParser(description='Saxi GradCam')
@@ -167,7 +169,7 @@ def get_argparse():
     model_group.add_argument('--model', help='Model for prediction', type=str, required=True)    
     model_group.add_argument('--target_layer', help='Target layer for GradCam. For example in ResNet, the target layer is the last conv layer which is layer4', type=str, default='layer4')
     model_group.add_argument('--target_class', help='Target class', type=int, default=None)
-    model_group.add_argument('--nn', help='Neural network name', type=str, default='SaxiClassification')
+    model_group.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', type=str, default='SaxiClassification')
 
 
     hyper_group = parser.add_argument_group('Hyperparameters')

@@ -10,8 +10,9 @@ import sys
 import utils
 import argparse
 
+#This files contains a function to convert OBJ files to VTK and add the label information to each VTK file
+
 def main(args):
-    #Main function to convert OBJ files to VTK and add the label information to each VTK file
     csv_path = args.csv
     output_dir = args.out
     vtk_output_dir = os.path.join(output_dir, "teeth-grand_challenge_vtk")  # Folder for VTK files
