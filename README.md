@@ -22,7 +22,7 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 
 ---
 
-## Installation
+## Installation (python 3.8 or 3.9 are required, no other versions)
 
 ### Installation of shapeaxi
 ```bash
@@ -32,31 +32,26 @@ pip install shapeaxi
 ### Installation of pytorch3d 
 
 For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
-- First, you need to know your python version (3.8, 3.9) using :
+- First, you need to install ipython :
 ```bash
-python --version
+pip ipython
 ```
-- Second, you need to know your CUDA version with this command line :
+Then, you can run **ipython** in the terminal (or **python -m IPython** if it is not working).  
+You can now add paste these lines :
 ```bash
-nvcc --version
+import sys
+import torch
+pyt_version_str=torch.__version__.split("+")[0].replace(".", "")
+version_str="".join([
+    f"py3{sys.version_info.minor}_cu",
+    torch.version.cuda.replace(".",""),
+    f"_pyt{pyt_version_str}"
+])
+print(version_str)
 ```
-It will print something like this : 
-```bash
-nvcc: NVIDIA (R) Cuda compiler driver
-Copyright (c) 2005-2022 NVIDIA Corporation
-Built on Tue_Mar__8_18:18:20_PST_2022
-Cuda compilation tools, release 11.6, V11.6.124
-Build cuda_11.6.r11.6/compiler.31057947_0
-```
-Then, you have to edit {YOURVERSION} by using your python and CUDA version.       
-For example, if you are using python 3.9 and CUDA 11.4, 
-```bash
-{YOURVERSION} = py38_cu116
-```
-The first part is *py* and your python version without the point.  
-The second part is *cu* and your CUDA version without the point.
-
-Finally, run this line by adding your editing {YOURVERSION}, 
+It will print something like this : **py39_cu117_pyt201**.  
+This is the content of your variable {YOURVERSION}.
+- Finally, you can run this line by adding your editing {YOURVERSION}, 
 ```bash
 pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{YOURVERSION}_pyt1110/download.html
 ```
