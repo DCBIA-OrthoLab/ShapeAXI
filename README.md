@@ -53,7 +53,7 @@ It will print something like this : **py39_cu117_pyt201**.
 This is the content of your variable {YOURVERSION}.
 - Finally, you can run this line by adding your editing {YOURVERSION}, 
 ```bash
-pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{YOURVERSION}_pyt1110/download.html
+pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{YOURVERSION}/download.html
 ```
 
 Finally, check the installation,
