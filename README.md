@@ -51,7 +51,7 @@ Build cuda_11.6.r11.6/compiler.31057947_0
 Then, you have to edit {YOURVERSION} by using your python and CUDA version.       
 For example, if you are using python 3.9 and CUDA 11.4, 
 ```bash
-{YOURVERSION} = py38_cu114
+{YOURVERSION} = py38_cu116
 ```
 The first part is *py* and your python version without the point.  
 The second part is *cu* and your CUDA version without the point.
