@@ -34,7 +34,7 @@ pip install shapeaxi
 For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
 - First, you need to install ipython :
 ```bash
-pip ipython
+pip install ipython
 ```
 Then, you can run **ipython** in the terminal (or **python -m IPython** if it is not working).  
 You can now add paste these lines :
