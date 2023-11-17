@@ -201,7 +201,7 @@ class SaxiTimepointsDataset(Dataset):
 
 
 class BrainIBISDataset(Dataset):
-    def __init__(self,df,list_demographic,list_path_ico,transform = None,version=None,column_subject_ID='Subject_ID',column_age='Age',name_class = 'ASD_administered'):
+    def __init__(self,df,list_demographic,list_path_ico,transform = None,version=None,column_subject_ID='Subject_ID',column_age='Age',name_class ='ASD_administered'):
         self.df = df
         self.list_demographic = list_demographic
         self.list_path_ico = list_path_ico
