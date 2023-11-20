@@ -199,7 +199,7 @@ def main(args):
     mount_point = args.mount_point  
     df_train = pd.read_csv(os.path.join(mount_point, args.csv_train))
     df_val = pd.read_csv(os.path.join(mount_point, args.csv_valid))
-    df_test = pd.read_csv(os.path.join(mount_point, args.csv_valid))
+    df_test = pd.read_csv(os.path.join(mount_point, args.csv_test))
 
     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
         SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test)

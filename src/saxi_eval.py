@@ -161,6 +161,16 @@ def main(args):
       df_report = pd.DataFrame(report).transpose()
       report_filename = os.path.splitext(args.csv)[0] + "_classification_report.csv"
       df_report.to_csv(report_filename)
+      
+      # Calculate F1 score
+      weighted_f1_score = report["weighted avg"]["f1-score"]
+
+      # Print or store F1 score
+      print("Weighted F1 Score:", weighted_f1_score)
+
+      # Return the F1 score or any other relevant metric
+      return weighted_f1_score
+
   
   elif args.nn == "SaxiSegmentation":
     # For the segmentation, evaluating a segmentation model, generating segmentation metrics, creating confusion matrix visualizations
@@ -252,7 +262,8 @@ def main(args):
     print("Overall accuracy:", ACC)
     print("F1 score:", F1)
 
-    print(classification_report(y_true_arr, y_pred_arr))
+    report = classification_report(y_true_arr, y_pred_arr, output_dict=True)
+    print(report)
 
     jaccard = jaccard_score(y_true_arr, y_pred_arr, average=None)
     print("jaccard score:", jaccard)
@@ -279,7 +290,7 @@ def main(args):
     s = sns.violinplot(data=dice_del, scale='count',cut=0)
     #plt.xticks([0, 1, 2, 3, 4, 5, 6,7,8], ["1", "2", "3", "4", "5", "6", "7","8", "9"])
     plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["18", "19", "20", "21", "22", "23","24","25","26","27","28","29","30","31"]) # lower
-    #plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15"]) # upper
+    #plt.xticks([0,1a, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15"]) # upper
     #plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32], ["1","2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15","16","17", "18", "19", "20", "21", "22","23","24","25","26","27","28","29","30","31","32","33"]) # lower
 
 
@@ -289,6 +300,14 @@ def main(args):
     ax.set_ylim([0.75, 1.005])
     plt.show()
     fig3.savefig(box_plot_filename)
+
+    # Access the weighted f1-score
+    weighted_f1_score = report['weighted avg']['f1-score']
+    # Print or store F1 score
+    print("Weighted F1 Score:", weighted_f1_score)
+
+    # Return the F1 score or any other relevant metric
+    return weighted_f1_score
 
 
   elif args.nn == "SaxiRegression":
