@@ -125,16 +125,16 @@ def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_
 def SaxiIcoClassification_train(args):
     list_path_ico = [args.path_ico_left,args.path_ico_right]
 
-    ###Demographics
+    #Demographics
     list_demographic = ['Gender','MRI_Age','AmygdalaLeft','HippocampusLeft','LatVentsLeft','ICV','Crbm_totTissLeft','Cblm_totTissLeft','AmygdalaRight','HippocampusRight','LatVentsRight','Crbm_totTissRight','Cblm_totTissRight'] #MLR
 
-    ###Transformation
+    #Transformation
     list_train_transform = [] 
     list_train_transform.append(CenterTransform())
     list_train_transform.append(NormalizePointTransform())
     list_train_transform.append(RandomRotationTransform())        
-    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) # Don't use this transformation if your object isn't a sphere
-    list_train_transform.append(NormalizePointTransform()) # Don't use this transformation if your object isn't a sphere
+    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) #Do not use this transformation if your object is not a sphere
+    list_train_transform.append(NormalizePointTransform()) #Do not use this transformation if your object is not a sphere
     train_transform = monai.transforms.Compose(list_train_transform)
 
     list_val_and_test_transform = []    
@@ -142,11 +142,11 @@ def SaxiIcoClassification_train(args):
     list_val_and_test_transform.append(NormalizePointTransform())
     val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
 
-    ### Get number of images
+    #Get number of images
     list_nb_verts_ico = [12, 42, 162, 642, 2562, 10242, 40962, 163842]
     nb_images = list_nb_verts_ico[args.ico_lvl-1]
     
-    ### Creation of Dataset
+    #Creation of Dataset
     brain_data = BrainIBISDataModule(args.batch_size,list_demographic,args.csv_train,args.csv_valid,args.csv_test,list_path_ico,train_transform = train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers)#MLR
     nbr_features = brain_data.get_features()
     weights = brain_data.get_weigths()
@@ -168,7 +168,7 @@ def SaxiIcoClassification_train(args):
     model = SAXINETS(**saxi_args)
 
     #Creation of Checkpoint (if we want to save best models)
-    checkpoint_callback_loss = ModelCheckpoint(dirpath='../Checkpoint/'+args.name,filename='{epoch}-{val_loss:.2f}',save_top_k=10,monitor='val_loss',)
+    checkpoint_callback_loss = ModelCheckpoint(dirpath='Checkpoint/'+args.name,filename='{epoch}-{val_loss:.2f}',save_top_k=10,monitor='val_loss',)
 
     #Logger (Useful if we use Tensorboard)
     logger = TensorBoardLogger(save_dir="test_tensorboard", name="my_model")
@@ -179,12 +179,14 @@ def SaxiIcoClassification_train(args):
     #Image Logger (Useful if we use Tensorboard)
     image_logger = ImageLogger(num_features = nbr_features,num_images = nb_images,mean = 0,std=args.noise_lvl)
 
-    ###Trainer
+    #Trainer
     trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=[early_stop_callback,checkpoint_callback_loss,image_logger],accelerator="gpu") #,accelerator="gpu"
     trainer.fit(model,datamodule=brain_data)
     trainer.test(model, datamodule=brain_data)
-
     print('Number of features : ',nbr_features)
+
+    return model, brain_data, trainer
+
 
 
 def main(args):
@@ -290,9 +292,7 @@ def get_argparse():
     return parser
 
 
-
 if __name__ == '__main__':
-
     parser = get_argparse()
     args = parser.parse_args()
     main(args)

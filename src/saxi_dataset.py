@@ -58,8 +58,6 @@ class SaxiDataset(Dataset):
         color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
         verts = utils.PolyDataToTensors(surf)[0]
         faces = utils.PolyDataToTensors(surf)[1]
-        # verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
-        # faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
 
         if self.surf_property:            
             faces_pid0 = faces[:,0:1]
@@ -85,7 +83,6 @@ class SaxiDataModule(pl.LightningDataModule):
     #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
     def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column='Classification', model='SaxiClassification', surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
         super().__init__()
-
         self.df_train = df_train
         self.df_val = df_val   
         self.df_test = df_test     
@@ -171,9 +168,6 @@ class SaxiTimepointsDataset(Dataset):
         color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
         verts = utils.PolyDataToTensors(surf)[0]
         faces = utils.PolyDataToTensors(surf)[1]
-        # verts = torch.tensor(vtk_to_numpy(surf.GetPoints().GetData())).to(torch.float32)
-        # faces = torch.tensor(vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]).to(torch.int64)
-
 
         if self.surf_property:            
 

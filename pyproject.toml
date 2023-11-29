@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 shapeaxi = "src.saxi_folds:cml"
+dentalmodelseg = "src.eval_model:cml"
 
 [project]
 name = "shapeaxi"

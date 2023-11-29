@@ -70,12 +70,15 @@ def SaxiSegmentation_predict(args, mount_point, df, fname, ext):
             utils.Write(surf , output_fn, print_out=False)
 
         out_dir = os.path.join(args.out, os.path.basename(args.model))
+
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
+
         data = {
             "surf": df["surf"],
             "pred": [os.path.join(args.out, df["surf"][idx]) for idx in range(len(df))]
         }
+        
         result_df = pd.DataFrame(data)
         output_fn = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
         print(f"Saving results to {output_fn}")
@@ -145,14 +148,12 @@ def SaxiRegression_predict(args, mount_point, df, fname, ext, test_loader, model
         else:
             out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
             df.to_parquet(out_name, index=False)
-    
 
 
 
 def main(args):
     # Read of the test data from a CSV or Parquet file
     mount_point = args.mount_point
-
     fname = os.path.basename(args.csv)    
     ext = os.path.splitext(fname)[1]
 
@@ -180,7 +181,13 @@ def main(args):
             SaxiRegression_predict(args, mount_point, df, fname, ext, test_loader, model)
 
     elif args.nn == "SaxiSegmentation":
-        SaxiSegmentation_predict(args, mount_point, df, fname, ext)                 
+        SaxiSegmentation_predict(args, mount_point, df, fname, ext) 
+
+    elif args.nn == "SaxiIcoClassification":
+        print("Not implemented yet") 
+
+    else:
+        raise NotImplementedError(f"Neural network {args.nn} is not implemented")             
 
 
 def get_argparse():
@@ -188,7 +195,7 @@ def get_argparse():
     parser = argparse.ArgumentParser(description='Saxi prediction')    
 
     model_group = parser.add_argument_group('Trained')
-    model_group.add_argument('--model', help='Model for prediction', type=str, default = "/work/leclercq/data/07-21-22_val-loss0.169.pth")
+    model_group.add_argument('--model', help='Model for prediction', type=str, required=True)
     model_group.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', type=str, default='SaxiClassification')
 
     input_group = parser.add_argument_group('Input')

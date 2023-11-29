@@ -22,11 +22,14 @@ from pytorch3d.renderer import (
         RasterizationSettings, MeshRenderer, MeshRasterizer, MeshRendererWithFragments, BlendParams,
         SoftSilhouetteShader, HardPhongShader, SoftPhongShader, AmbientLights, PointLights, TexturesUV, TexturesVertex, TexturesAtlas
 )
+import requests
+from io import BytesIO
+import json
+import os
 
 import utils
 from IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
 from saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, SelfAttention, Identity, TimeDistributed
-
 
 
 class ProjectionHead(nn.Module):
@@ -90,7 +93,7 @@ class SelfAttention(nn.Module):
 
 
 
-#################################################### SEGMENTATION PART ####################################################
+#################################################################################### SEGMENTATION PART ########################################################################
 
 class SaxiSegmentation(pl.LightningModule):
     # Saxi segmentation network
@@ -222,7 +225,7 @@ class SaxiSegmentation(pl.LightningModule):
 
 
 
-#################################################### CLASSIFICATION PART ####################################################
+########################################################################## CLASSIFICATION PART ######################################################################################
 
 class SaxiClassification(pl.LightningModule):
     # Saxi classification network
@@ -353,7 +356,7 @@ class SaxiClassification(pl.LightningModule):
 
 
 
-#################################################### SAXIREGRESSION PART ####################################################
+################################################################################ SAXIREGRESSION PART ################################################################################
 
 
 class SaxiRegression(pl.LightningModule):
@@ -490,7 +493,7 @@ class SaxiRegression(pl.LightningModule):
 
 
 
-#################################################### MONAIUNET PART ####################################################
+#################################################################################### MONAIUNET PART #########################################################################################
 
 class MonaiUNet(pl.LightningModule):
     # Monai UNet network
@@ -639,7 +642,7 @@ class MonaiUNet(pl.LightningModule):
         return {'test_loss': loss, 'test_correct': self.accuracy}
 
 
-############################################################################### ICOCONV PART ############################################################################
+########################################################################################### ICOCONV PART ########################################################################################
 
 class SaxiIcoClassification(pl.LightningModule):
 
@@ -898,3 +901,54 @@ class SaxiIcoClassification(pl.LightningModule):
     def Is_it_Icolayer(self,layer):
         return (layer[:3] == 'Ico')
 
+
+
+#################################################################### DENTAL MODEL SEGMENTATION PART #########################################################################################
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'config.json')
+
+def create_unet_model(out_channels):
+    model = monai.networks.nets.UNet(
+        spatial_dims=2,
+        in_channels=4,   # images: torch.cuda.FloatTensor[batch_size,224,224,4]
+        out_channels=out_channels, 
+        channels=(16, 32, 64, 128, 256),
+        strides=(2, 2, 2, 2),
+        num_res_units=2,
+    )
+    # model = TimeDistributed(unet)
+    return model
+
+def dental_model_seg(model):
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+        model_url = config.get('dental', {}).get('url')
+        if not model_url:
+            print("Error: Model URL not found in the config file.")
+            return None
+        state_dict = torch.hub.load_state_dict_from_url(model_url)
+        model.load_state_dict(state_dict)
+        return model
+
+
+
+
+
+
+
+# response = requests.get(model_url)
+# Check if the request was successful (code 200)
+# if response.status_code == 200:
+# else:
+#     print(f"Error loading model from URL. Status code: {response.status_code}")
+#     return None
+
+
+
+# loaded_model_state_dict = torch.load(BytesIO(response.content), map_location=device)
+# # Match keys in the state_dict
+# current_model_state_dict = model.state_dict()
+# for key in loaded_model_state_dict.keys():
+#     if key in current_model_state_dict and current_model_state_dict[key].shape == loaded_model_state_dict[key].shape:
+#         current_model_state_dict[key] = loaded_model_state_dict[key]
