@@ -145,7 +145,6 @@ class SaxiSegmentation(pl.LightningModule):
         V, F, CN = x
         X, PF = self.render(V, F, CN)
         x = self.model(X)
-        
         return x, X, PF
 
     def render(self, V, F, CN):
@@ -645,7 +644,6 @@ class MonaiUNet(pl.LightningModule):
 ########################################################################################### ICOCONV PART ########################################################################################
 
 class SaxiIcoClassification(pl.LightningModule):
-
     def __init__(self, **kwargs):
         super(SaxiIcoClassification, self).__init__()
         self.save_hyperparameters()
@@ -905,50 +903,112 @@ class SaxiIcoClassification(pl.LightningModule):
 
 #################################################################### DENTAL MODEL SEGMENTATION PART #########################################################################################
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(script_dir, 'config.json')
+class DentalModelSeg(pl.LightningModule):
+    def __init__(self, args=None, out_channels=3 ,config_path = "./", class_weights=None, image_size=320, radius=1.35, subdivision_level=1, train_sphere_samples=4):
+        super(DentalModelSeg, self).__init__()        
+        self.save_hyperparameters()        
+        self.args = args
+        self.config_path = config_path
+        self.out_channels = out_channels
+        self.class_weights = None
+        if(class_weights is not None):
+            self.class_weights = torch.tensor(class_weights).to(torch.float32)
+            
+        self.loss = monai.losses.DiceCELoss(include_background=False, to_onehot_y=True, softmax=True, ce_weight=self.class_weights)
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=34)
 
-def create_unet_model(out_channels):
-    model = monai.networks.nets.UNet(
-        spatial_dims=2,
-        in_channels=4,   # images: torch.cuda.FloatTensor[batch_size,224,224,4]
-        out_channels=out_channels, 
-        channels=(16, 32, 64, 128, 256),
-        strides=(2, 2, 2, 2),
-        num_res_units=2,
-    )
-    # model = TimeDistributed(unet)
-    return model
+        #Initialize and load model
+        unet = self.create_unet_model()
+        self.model = self.dental_model_seg(unet)
+        self.model = TimeDistributed(unet)
 
-def dental_model_seg(model):
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-        model_url = config.get('dental', {}).get('url')
-        if not model_url:
-            print("Error: Model URL not found in the config file.")
-            return None
-        state_dict = torch.hub.load_state_dict_from_url(model_url)
-        model.load_state_dict(state_dict)
+        ico_verts, ico_faces, ico_edges = utils.PolyDataToTensors(utils.CreateIcosahedron(radius=radius, sl=subdivision_level))
+        ico_verts = ico_verts.to(torch.float32)
+
+        for idx, v in enumerate(ico_verts):
+            if (torch.abs(torch.sum(v)) == radius):
+                ico_verts[idx] = v + torch.normal(0.0, 1e-7, (3,))
+        
+        self.register_buffer("ico_verts", ico_verts)
+
+        cameras = FoVPerspectiveCameras()
+        raster_settings = RasterizationSettings(image_size=image_size, blur_radius=0, faces_per_pixel=1, max_faces_per_bin=200000)        
+        rasterizer = MeshRasterizer(cameras=cameras, raster_settings=raster_settings)
+
+        lights = AmbientLights()
+        self.renderer = MeshRenderer(rasterizer=rasterizer, shader=HardPhongShader(cameras=cameras, lights=lights))
+
+    def create_unet_model(self):
+        model = monai.networks.nets.UNet(
+            spatial_dims=2,
+            in_channels=4,   # images: torch.cuda.FloatTensor[batch_size,224,224,4]
+            out_channels=self.out_channels, 
+            channels=(16, 32, 64, 128, 256),
+            strides=(2, 2, 2, 2),
+            num_res_units=2,
+        )
         return model
 
+    def dental_model_seg(self, model):
+        with open(self.config_path, 'r') as f:
+            config = json.load(f)
+            model_url = config.get('dental', {}).get('url')
+            if not model_url:
+                print("Error: Model URL not found in the config file.")
+                return None
+            state_dict = torch.hub.load_state_dict_from_url(model_url)
+            model.load_state_dict(state_dict)
+            print("Model loaded successfully")
+            return model
 
+    def configure_optimizers(self):
+        # Configure the optimizer
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.args.lr)
+        return optimizer
 
+    def to(self, device=None):
+        # Move the renderer to the specified device
+        self.renderer = self.renderer.to(device)
+        return super().to(device)
 
+    def forward(self, x):
+        # Forward pass
+        V, F, CN = x
+        X, PF = self.render(V, F, CN)
+        x = self.model(X)
+        return x, X, PF
 
+    def render(self, V, F, CN):
+        # Render the input surface mesh to an image
+        textures = TexturesVertex(verts_features=CN)
+        meshes = Meshes(verts=V, faces=F, textures=textures)        
+        X = []
+        PF = []
 
+        for camera_position in self.ico_verts:
+            camera_position = camera_position.unsqueeze(0)
+            R = look_at_rotation(camera_position, device=self.device)  # (1, 3, 3)
+            T = -torch.bmm(R.transpose(1, 2), camera_position[:,:,None])[:, :, 0]   # (1, 3)
+            images = self.renderer(meshes_world=meshes.clone(), R=R, T=T)
+            fragments = self.renderer.rasterizer(meshes.clone())
+            pix_to_face = fragments.pix_to_face
+            zbuf = fragments.zbuf
+            images = torch.cat([images[:,:,:,0:3], zbuf], dim=-1)
+            images = images.permute(0,3,1,2)
+            pix_to_face = pix_to_face.permute(0,3,1,2)
+            X.append(images.unsqueeze(1))
+            PF.append(pix_to_face.unsqueeze(1))
+        
+        X = torch.cat(X, dim=1)
+        PF = torch.cat(PF, dim=1)        
 
-# response = requests.get(model_url)
-# Check if the request was successful (code 200)
-# if response.status_code == 200:
-# else:
-#     print(f"Error loading model from URL. Status code: {response.status_code}")
-#     return None
+        return X, PF
 
+    def training_step(self, train_batch, batch_idx):
+        pass
 
+    def validation_step(self, val_batch, batch_idx):
+        pass
 
-# loaded_model_state_dict = torch.load(BytesIO(response.content), map_location=device)
-# # Match keys in the state_dict
-# current_model_state_dict = model.state_dict()
-# for key in loaded_model_state_dict.keys():
-#     if key in current_model_state_dict and current_model_state_dict[key].shape == loaded_model_state_dict[key].shape:
-#         current_model_state_dict[key] = loaded_model_state_dict[key]
+    def test_step(self, val_batch, batch_idx):
+        pass

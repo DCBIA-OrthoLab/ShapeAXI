@@ -43,6 +43,7 @@ def SaxiSegmentation_predict(args, mount_point, df, fname, ext):
             V = V.cuda(non_blocking=True)
             F = F.cuda(non_blocking=True)
             CN = CN.cuda(non_blocking=True).to(torch.float32)
+            print(V.shape, F.shape, CN.shape)
             x, X, PF = model((V, F, CN))
             x = softmax(x*(PF>=0))
             P_faces = torch.zeros(out_channels, F.shape[1]).to(device)
@@ -205,6 +206,7 @@ def get_argparse():
     input_group.add_argument('--mount_point', help='Dataset mount directory', type=str, default="./")
     input_group.add_argument('--num_workers', help='Number of workers for loading', type=int, default=4)
     input_group.add_argument('--array_name',type=str, help = 'Predicted ID array name for output vtk', default="PredictedID")
+    input_group.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='Learning rate')
 
     hyper_group = parser.add_argument_group('Hyperparameters')
     hyper_group.add_argument('--radius', help='Radius of icosphere', type=float, default=1.35)    
