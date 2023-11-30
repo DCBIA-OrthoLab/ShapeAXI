@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-shapeaxi = "src.saxi_folds:cml"
-dentalmodelseg = "src.eval_model:cml"
+shapeaxi = "shapeaxi.src.saxi_folds:cml"
+dentalmodelseg = "shapeaxi.src.eval_model:cml"
 
 [project]
 name = "shapeaxi"
@@ -132,7 +132,7 @@ dependencies = [
 "Source Code" = "https://github.com/DCBIA-OrthoLab/ShapeAXI/"
 
 [tool.hatch.version]
-path = "src/shapeaxi/__about__.py"
+path = "shapeaxi/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -147,7 +147,6 @@ cov-report = [
   "- coverage combine",
   "coverage report",
 ]
-
 cov = [
   "test-cov",
   "cov-report",
@@ -163,7 +162,6 @@ dependencies = [
   "mypy>=1.0.0",
   "ruff>=0.0.243",
 ]
-
 [tool.hatch.envs.lint.scripts]
 typing = "mypy --install-types --non-interactive {args:src/shapeaxi tests}"
 style = [
