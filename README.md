@@ -65,6 +65,7 @@ Finally, check the installation,
 ```bash
 pip show pytorch3d
 ```
+---
 
 ## Usage
 
