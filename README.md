@@ -1,7 +1,12 @@
 # ShapeAXI
 
-Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-edge framework designed for comprehensive shape analysis.
+Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-edge framework designed for comprehensive shape analysis.  
 
+---
+If you want, you can have access to another documentation to run an executable called **dentalmodelseg** :
+
+
+[DentalModelSeg](DentalModelSeg.md)
 ---
 
 ## Table of Contents
