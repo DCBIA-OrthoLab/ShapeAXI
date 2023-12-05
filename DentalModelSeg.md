@@ -9,10 +9,6 @@ Welcome to the official documentation for **DentalModelSeg**.
 - [Introduction](#introduction)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Experiments & Results](#experiments--results)
-- [Explainability](#explainability)
-- [Contribute](#contribute)
-- [FAQs](#faqs)
 - [License](#license)
 
 ---
@@ -80,32 +76,6 @@ You can add the folder of your output where the data will be stored and if this 
 You can identify it by adding **--out**.  
 The prediction files will be created in this out folder with the name of your input with *_pred*. Otherwise, if you use vtk input, if you set **--overwrite** to *True*, it will overwrite your vtk input by the predicted file with the same name.
 Moreover, using **--segmentation_crown**, it will create a file for each teeth depending on their label in the output directory.
-
----
-
-## Experiments & Results
-
----
-
-## Explainability
-
---- 
-
-## Contribute
-
-We welcome community contributions to **DentalModelSeg**. For those keen on enhancing this tool, please adhere to the steps below:
-
-1. **Fork** the repository.
-2. Create your **feature branch** (`git checkout -b feature/YourFeature`).
-3. Commit your changes (`git commit -am 'Add some feature'`).
-4. Push to the branch (`git push origin feature/YourFeature`).
-5. Open a **pull request**.
-
-For a comprehensive understanding of our contribution process, consult our [Contribution Guidelines](path/to/contribution_guidelines.md).
-
---- 
-
-## FAQs
 
 ---
 
