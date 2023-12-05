@@ -72,9 +72,9 @@ If you want to load your own model, your can by specify **--model** and adding t
 
 ## Output
 
-You can add the folder of your output where the data will be stored and if this folder does not exist, it will be create.  
-You can identify it by adding **--out**.  
-The prediction files will be created in this out folder with the name of your input with *_pred*. Otherwise, if you use vtk input, if you set **--overwrite** to *True*, it will overwrite your vtk input by the predicted file with the same name.
+You can add the folder of your output where the data will be stored and if this folder does not exist, it will be create.   
+You can identify it by adding **--out**.    
+The prediction files will be created in this out folder with the name of your input with *_pred*. Otherwise, if you use vtk input, if you set **--overwrite** to *True*, it will overwrite your vtk input by the predicted file with the same name.  
 Moreover, using **--segmentation_crown**, it will create a file for each teeth depending on their label in the output directory.
 
 ---
