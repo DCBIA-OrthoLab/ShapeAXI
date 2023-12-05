@@ -3,11 +3,6 @@
 Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-edge framework designed for comprehensive shape analysis.  
 
 ---
-If you want, you can have access to another documentation to run an executable called **dentalmodelseg** :
-
-
-[DentalModelSeg](DentalModelSeg.md)
----
 
 ## Table of Contents
 - [Introduction](#introduction)
@@ -16,6 +11,7 @@ If you want, you can have access to another documentation to run an executable c
 - [Experiments & Results](#experiments--results)
 - [Explainability](#explainability)
 - [Contribute](#contribute)
+- [Application](#application)
 - [FAQs](#faqs)
 - [License](#license)
 
@@ -220,6 +216,15 @@ For a comprehensive understanding of our contribution process, consult our [Cont
 ---
 
 Of course! Here are some general FAQ entries tailored for a tool/framework like ShapeAXI:
+
+---
+
+## Application 
+
+On of the application on this tool is to be able to run a prediction using a pretrained model on your own data.  
+If you want, you can have access to this package documentation called **dentalmodelseg** :
+
+[DentalModelSeg](DentalModelSeg.md)
 
 ## FAQs
 
