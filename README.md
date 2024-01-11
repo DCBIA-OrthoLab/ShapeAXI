@@ -65,59 +65,52 @@ pip show pytorch3d
 
 ## Usage
 
-### Basic Usage:
-
-To get started with **ShapeAXI**, follow the steps below:
-
-
-#### Example CSV File
-
-Your input CSV file should be structured as follows:
-
-| surf                                 | class  |
-|--------------------------------------|--------|
-| path/to/shape1.vtk                   | class1 |
-| path/to/shape2.stl                   | class2 |
-| path/to/shape3.obj                   | class1 |
-| ...                                  | ...    |
-
-
-- **surf**: This column holds the file paths to the 3D shape objects. The tool supports the formats `.vtk`, `.stl`, and `.obj`.
-- **class**: This column indicates the class of the 3D object.
+In this package you have the possibility of running four different models : **Classification**, **Regression**, **Segmentation** and **IcoConv**.
 
 ### Running ShapeAXI
 
-To use ShapeAXI, execute the `saxi_folds.py` script:
+To use ShapeAXI, execute the `saxi_folds.py` script with several options:
 
 ```bash
-python saxi_folds.py --csv your_data.csv --compute_scale_factor 1 --surf_column surf --class_column class --subdivision_level 2 --batch_size 8 --out output_dir/
-```
-
-Ensure you replace `your_data.csv` with the correct path to your specific CSV file. 
-
-```
-usage: saxi_folds.py [-h] --csv CSV [--folds FOLDS] [--valid_split VALID_SPLIT] [--group_by GROUP_BY] [--nn NN] [--surf_column SURF_COLUMN] [--class_column CLASS_COLUMN] [--compute_scale_factor COMPUTE_SCALE_FACTOR] [--mount_point MOUNT_POINT]
-                     [--num_workers NUM_WORKERS] [--base_encoder BASE_ENCODER] [--base_encoder_params BASE_ENCODER_PARAMS] [--hidden_dim HIDDEN_DIM] [--radius RADIUS] [--subdivision_level SUBDIVISION_LEVEL] [--image_size IMAGE_SIZE] [--lr LR] [--epochs EPOCHS]
-                     [--batch_size BATCH_SIZE] [--patience PATIENCE] [--log_every_n_steps LOG_EVERY_N_STEPS] [--tb_dir TB_DIR] [--tb_name TB_NAME] [--neptune_project NEPTUNE_PROJECT] [--neptune_tags NEPTUNE_TAGS] [--target_layer TARGET_LAYER] [--fps FPS] [--out OUT]
+usage: shapeaxi [-h] --csv CSV [--folds FOLDS] [--valid_split VALID_SPLIT] [--group_by GROUP_BY] --nn {SaxiClassification,SaxiRegression,SaxiSegmentation,SaxiIcoClassification} [--csv_train CSV_TRAIN]
+                [--csv_valid CSV_VALID] [--csv_test CSV_TEST] [--model MODEL] [--train_sphere_samples TRAIN_SPHERE_SAMPLES] [--surf_column SURF_COLUMN] [--class_column CLASS_COLUMN]
+                [--scale_factor SCALE_FACTOR] [--profiler PROFILER] [--compute_scale_factor COMPUTE_SCALE_FACTOR] [--mount_point MOUNT_POINT] [--num_workers NUM_WORKERS] [--base_encoder BASE_ENCODER]
+                [--base_encoder_params BASE_ENCODER_PARAMS] [--hidden_dim HIDDEN_DIM] [--radius RADIUS] [--image_size IMAGE_SIZE] [--lr LR] [--epochs EPOCHS] [--batch_size BATCH_SIZE]
+                [--patience PATIENCE] [--log_every_n_steps LOG_EVERY_N_STEPS] [--tb_dir TB_DIR] [--tb_name TB_NAME] [--neptune_project NEPTUNE_PROJECT] [--neptune_tags NEPTUNE_TAGS]
+                [--path_ico_right PATH_ICO_RIGHT] [--path_ico_left PATH_ICO_LEFT] [--layer LAYER] [--ico_lvl ICO_LVL] [--mean MEAN] [--std STD] [--crown_segmentation CROWN_SEGMENTATION] [--fdi FDI]
+                [--csv_true_column CSV_TRUE_COLUMN] [--csv_tag_column CSV_TAG_COLUMN] [--csv_prediction_column CSV_PREDICTION_COLUMN] [--eval_metric {F1,AUC}] [--target_layer TARGET_LAYER] [--fps FPS]
+                [--out OUT]
 
 Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability
 
-options:
+optional arguments:
   -h, --help            show this help message and exit
 
 Split:
   --csv CSV             CSV with columns surf,class
   --folds FOLDS         Number of folds
   --valid_split VALID_SPLIT
-                        Number of folds
+                        Split float [0-1]
   --group_by GROUP_BY   GroupBy criteria in the CSV. For example, SubjectID in case the same subjects has multiple timepoints/data points and the subject must belong to the same data split
 
 Train:
-  --nn NN               Type of neural network for training
+  --nn {SaxiClassification,SaxiRegression,SaxiSegmentation,SaxiIcoClassification}
+                        Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification
+  --csv_train CSV_TRAIN
+                        CSV with column surf
+  --csv_valid CSV_VALID
+                        CSV with column surf
+  --csv_test CSV_TEST   CSV with column surf
+  --model MODEL         Model to continue training
+  --train_sphere_samples TRAIN_SPHERE_SAMPLES
+                        Number of samples for the training sphere
   --surf_column SURF_COLUMN
                         Surface column name
   --class_column CLASS_COLUMN
                         Class column name
+  --scale_factor SCALE_FACTOR
+                        Scale factor for the shapes
+  --profiler PROFILER   Profiler
   --compute_scale_factor COMPUTE_SCALE_FACTOR
                         Compute a global scale factor for all shapes in the population.
   --mount_point MOUNT_POINT
@@ -131,12 +124,9 @@ Train:
   --hidden_dim HIDDEN_DIM
                         Hidden dimension for features output. Should match with output of base_encoder. Default value is 512
   --radius RADIUS       Radius of icosphere
-  --subdivision_level SUBDIVISION_LEVEL
-                        Subdivision level for icosahedron
   --image_size IMAGE_SIZE
                         Image resolution size
-  --lr LR, --learning-rate LR
-                        Learning rate
+  --lr LR               Learning rate
   --epochs EPOCHS       Max number of epochs
   --batch_size BATCH_SIZE
                         Batch size
@@ -149,6 +139,29 @@ Train:
                         Neptune project
   --neptune_tags NEPTUNE_TAGS
                         Neptune tags
+  --path_ico_right PATH_ICO_RIGHT
+                        Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)
+  --path_ico_left PATH_ICO_LEFT
+                        Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)
+  --layer LAYER         Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)
+  --ico_lvl ICO_LVL     Ico level, minimum level is 1 (default: 2)
+  --mean MEAN           Mean (default: 0)
+  --std STD             Standard deviation (default: 0.005)
+
+Prediction group:
+  --crown_segmentation CROWN_SEGMENTATION
+                        Isolation of each different tooth in a specific vtk file
+  --fdi FDI             numbering system. 0: universal numbering; 1: FDI world dental Federation notation
+
+Test group:
+  --csv_true_column CSV_TRUE_COLUMN
+                        Which column to do the stats on
+  --csv_tag_column CSV_TAG_COLUMN
+                        Which column has the actual names
+  --csv_prediction_column CSV_PREDICTION_COLUMN
+                        csv true class
+  --eval_metric {F1,AUC}
+                        Score you want to choose for picking the best model : F1 or AUC
 
 Explainability group:
   --target_layer TARGET_LAYER
@@ -157,6 +170,49 @@ Explainability group:
 
 Output:
   --out OUT             Output
+```  
+
+
+## Example of running for each model
+
+
+No matter which model you choose you must specify your input csv file with **--csv**, like for example,  
+
+| surf                                 | class  |
+|--------------------------------------|--------|
+| path/to/shape1.vtk                   | class1 |
+| path/to/shape2.stl                   | class2 |
+| path/to/shape3.obj                   | class1 |
+| ...                                  | ...    |
+
+
+**surf**: This column holds the file paths to the 3D shape objects. The tool supports the formats `.vtk`, `.stl`, and `.obj`.  
+**class**: This column indicates the class of the 3D object.
+
+
+### Classification (--nn SaxiClassification)
+
+```bash
+shapeaxi --csv your_data.csv --epochs 40 --nn SaxiClassification --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --compute_scale_factor 1 --surf_column surf --class_column class --batch_size 8
+```
+
+### IcoConv (--nn SaxiIcoClassification)
+
+```bash
+shapeaxi --csv your_data.csv --nn SaxiIcoClassification --epochs 30 --folds 3 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --path_ico_left /path/to/vtk/left/hemisphere --path_ico_right /path/to/vtk/right/hemisphere --class_column ASD_administered
+```
+For this model, you **have to** specify the path to your right vtk hemisphere data and same for the left one.
+
+### Regression (--nn SaxiRegression)
+
+```bash
+shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --compute_scale_factor 1 --surf_column surf --class_column class --batch_size 8
+```
+
+### Segmentation (--nn SaxiSegmentation)
+
+```bash
+shapeaxi --csv your_data.csv --nn SaxiSegmentation --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --eval_metric AUC
 ```
 
 #### Workflow:
