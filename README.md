@@ -65,7 +65,11 @@ pip show pytorch3d
 
 ## Usage
 
-In this package you have the possibility of running four different models : **Classification**, **Regression**, **Segmentation** and **IcoConv**.
+In this package you have the possibility of running four different models :
+- **Classification**
+- **Regression**
+- **Segmentation**
+- **IcoConv**
 
 ### Running ShapeAXI
 
@@ -176,7 +180,7 @@ Output:
 ## Example of running for each model
 
 
-No matter which model you choose you must specify your input csv file with **--csv**, like for example,  
+No matter which model you choose you must specify your input csv file with **--csv**, for example,  
 
 | surf                                 | class  |
 |--------------------------------------|--------|
@@ -193,7 +197,7 @@ No matter which model you choose you must specify your input csv file with **--c
 ### Classification (--nn SaxiClassification)
 
 ```bash
-shapeaxi --csv your_data.csv --epochs 40 --nn SaxiClassification --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --compute_scale_factor 1 --surf_column surf --class_column class --batch_size 8
+shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --compute_scale_factor 1 --surf_column surf --class_column class --batch_size 8
 ```
 
 ### IcoConv (--nn SaxiIcoClassification)
