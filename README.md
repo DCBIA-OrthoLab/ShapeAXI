@@ -219,6 +219,13 @@ Here, an example of the content of you csv files :
 For this step, there are one training, validation and testing dataset for each fold. You can choose for the training : batch size, maximum number of epochs, model you want.  
 If you want, you can specify **--csv_train**, **--csv_test** and **--csv_valid** for each fold
 
+### 4. Test, evaluation, aggregate and explainability
+
+Finally, shapeaxi will test the different models after their training. It will test them during the evaluation part.  
+During this process, shapeaxi will pick the best model from all the different folders depending on F1 score or AUC score.  
+You can choose the evaluation metric with the option **--eval_metric F1** or **--eval_metric AUC**.  
+Your best model will then be tested on the first test dataset of the first split.
+
 
 ### Examples
 
