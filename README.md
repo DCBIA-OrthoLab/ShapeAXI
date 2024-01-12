@@ -225,6 +225,10 @@ Finally, ShapeAXI will test the different models after their training. It will t
 During this process, ShapeAXI will pick the best model from all the different folders depending on F1 score or AUC score.  
 You can choose the evaluation metric with the option **--eval_metric F1** or **--eval_metric AUC**.  
 Your best model will then be tested on the first test dataset of the first split.
+ShapeAXI will produce : 
+- A confusion matrix.
+- ROC curves.
+- Explainability maps for each shape in the dataset.
 
 
 ### Examples
@@ -254,16 +258,7 @@ shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mou
 shapeaxi --csv your_data.csv --nn SaxiSegmentation --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --eval_metric AUC
 ```
 
-#### Workflow:
 
-1. On running `saxi_folds.py`, the tool will:
-   - Generate the necessary N folds.
-   - Handle the training, validation, and testing.
-
-2. The tool then produces:
-   - A confusion matrix.
-   - ROC curves.
-   - Explainability maps for each shape in the dataset.
 
 ## Experiments & Results
 
@@ -316,7 +311,7 @@ Of course! Here are some general FAQ entries tailored for a tool/framework like 
 
 ## Application 
 
-On of the application on this tool is to be able to run a prediction using a pretrained model on your own data.  
+One of the application on this tool is to be able to run a prediction using a pretrained model on your own data.  
 If you want, you can have access to this package documentation called **dentalmodelseg** :
 
 [DentalModelSeg](DentalModelSeg.md)
