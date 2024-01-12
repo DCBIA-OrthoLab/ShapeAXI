@@ -78,10 +78,10 @@ If you want to load your own model, your can by specify **--model** and adding t
 You can add the folder of your output where the data will be stored and if this folder does not exist, it will be create.   
 You can identify it by adding **--out**.    
 The prediction files will be created in this out folder with the name of your input with *_pred*. Otherwise, if you use vtk input, if you set **--overwrite** to *True*, it will overwrite your input by the predicted file.  
-Moreover, using **--segmentation_crown**, it will create a file for each teeth depending on their label in the output directory.<br>
+Moreover, using **--segmentation_crown**, will create a file for each teeth depending on their label in the output directory.<br>
 
 Finally, if you use a **csv** input, you can use another argumment **--vtk_folder**.    
-- For example your csv is : /home/data/filecsv.csv
+- For example the path to your csv is : /home/data/filecsv.csv
 - Your csv file contains lines like these :  
  */home/data/vtk_nonsegmented/test/file1.vtk*  
  */home/data/vtk_nonsegmented/file2.vtk*  
@@ -92,8 +92,8 @@ Finally, if you use a **csv** input, you can use another argumment **--vtk_folde
 - Your suffix is : pred
 
 It will store your vtk files in this path : /output + /filecsv_pred + /path_to_vtk_file - /vtk_folder  
-In this example : /home/data/vtk_segmented/filecsv_pred/test/file1.vtk (for the first vtk file)  
-Instead of this : /home/data/vtk_segmented/filecsv_pred/home/data/vtk_nonsegmented/test/file1.vtk if you do not specify vtk_folder  
+In this example, it will sotre the results here : /home/data/vtk_segmented/filecsv_pred/test/file1.vtk (for the first vtk file)  
+Instead of here : /home/data/vtk_segmented/filecsv_pred/home/data/vtk_nonsegmented/test/file1.vtk if you do not specify vtk_folder  
 
 ---
 
