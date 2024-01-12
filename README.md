@@ -189,24 +189,36 @@ Output:
 
 ### 1. Compute scale factor
 
+The first step of the code is to compute a global scale factor for all shapes in the population.  
+If you want to do this, add **--compute_scale_factor 1**.  
+Moreover, if you already has a column with scale_factor in your csv file, specify it with **--column_scale_factor _name_of_your_column_**.
+Otherwise, if you do not want to compute a global scale factor, do not specify anything and it will skip thie part.  
+
+
 ### 2. Split
 
 No matter which model you choose you must specify your input.  
-You can choose between **--csv** input or both **--csv_first_train** and **--csv_first_test**. If you specify csv input, shapeaxi will split the csv data between train and test (80% and 20% but you can specify the split using **--valid_split**). Otherwise, if you specify csv_train and csv_test, it will skip this first split.    
-Now, shapeaxi uses the train set and split between train, test and valid dataset for each fold.  
+You can choose between **--csv** input or both **--csv_first_train** and **--csv_first_test**. If you specify one csv file as input, shapeaxi will split the dataset between train and test (80% and 20% but you can specify the split using **--valid_split** if you want 85% and 15% for example).  
+Otherwise, if you specify csv_train and csv_test, it will skip this first split.    
+Now, shapeaxi uses the train set and split it between : train, test and valid dataset for each folder.  
+Shapeaxi will train, test and evaluate one model for each folder.
 Here, an example of the content of you csv files : 
 
 | surf                                 | class  |
 |--------------------------------------|--------|
 | path/to/shape1.vtk                   | class1 |
 | path/to/shape2.stl                   | class2 |
-| path/to/shape3.obj                   | class1 |
+| path/to/shape3.vtk                   | class1 |
 | ...                                  | ...    |
 
-**surf**: This column holds the file paths to the 3D shape objects. The tool supports the formats `.vtk`, `.stl`, and `.obj`.  
+**surf**: This column holds the file paths to the 3D shape objects. The tool supports the formats `.vtk` and `.stl`.  
 **class**: This column indicates the class of the 3D object.
 
 ### 3. Training 
+
+For this step, there are one training, validation and testing dataset for each fold. You can choose for the training : batch size, maximum number of epochs, model you want.  
+If you want, you can specify **--csv_train**, **--csv_test** and **--csv_valid** for each fold
+
 
 ### Examples
 
