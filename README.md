@@ -8,7 +8,7 @@ Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-ed
 - [Introduction](#introduction)
 - [Installation](#installation)
 - [Usage](#usage)
-- [How does it work ?](#how-does-it-work)
+- [How does it work](#how-does-it-work)
 - [Experiments & Results](#experiments--results)
 - [Explainability](#explainability)
 - [Contribute](#contribute)
