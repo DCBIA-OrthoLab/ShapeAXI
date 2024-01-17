@@ -190,15 +190,15 @@ Output:
 ### 1. Compute scale factor
 
 The first step of the code is to compute a global scale factor for all shapes in the population.  
-If you want to do this, add **--compute_scale_factor 1**.  
-Moreover, if you already has a column with scale_factor in your csv file, specify it with **--column_scale_factor _name_of_your_column_**.
+If you want to do this, add ```--compute_scale_factor 1```.  
+Moreover, if you already has a column with scale_factor in your csv file, specify it with ```--column_scale_factor name_of_your_column```.
 Otherwise, if you do not want to compute a global scale factor, do not specify anything and it will skip thie part.  
 
 
 ### 2. Split
 
 No matter which model you choose you must specify your input.  
-You can choose between **--csv** input or both **--csv_first_train** and **--csv_first_test**. If you specify one csv file as input, ShapeAXI will split the dataset between train and test (80% and 20% but you can specify the split using **--valid_split** if you want 85% and 15% for example).  
+You can choose between ```--csv``` input or both ```--csv_first_train``` and ```--csv_first_test```. If you specify one csv file as input, ShapeAXI will split the dataset between train and test (80% and 20% but you can specify the split using ```--valid_split``` if you want 85% and 15% for example).  
 Otherwise, if you specify csv_train and csv_test, it will skip this first split.    
 Now, ShapeAXI uses the train set and split it between : train, test and valid dataset for each folder.  
 ShapeAXI will train, test and evaluate one model for each folder.
@@ -217,13 +217,13 @@ Here, an example of the content of you csv files :
 ### 3. Training 
 
 For this step, there are one training, validation and testing dataset for each fold. You can choose for the training : batch size, maximum number of epochs, model you want.  
-If you want, you can specify **--csv_train**, **--csv_test** and **--csv_valid** for each fold
+If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold
 
 ### 4. Test, evaluation, aggregate and explainability
 
 Finally, ShapeAXI will test the different models after their training. It will test them during the evaluation part.  
 During this process, ShapeAXI will pick the best model from all the different folders depending on F1 score or AUC score.  
-You can choose the evaluation metric with the option **--eval_metric F1** or **--eval_metric AUC**.  
+You can choose the evaluation metric with the option ```--eval_metric F1``` or ```--eval_metric AUC```.  
 Your best model will then be tested on the first test dataset of the first split.
 ShapeAXI will produce : 
 - A confusion matrix.
