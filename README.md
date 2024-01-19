@@ -217,7 +217,7 @@ Here, an example of the content of you csv files :
 ### 3. Training 
 
 For this step, there are one training, validation and testing dataset for each fold. You can choose for the training : batch size, maximum number of epochs, model you want.  
-If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold
+If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold 
 
 ### 4. Test, evaluation, aggregate and explainability
 
