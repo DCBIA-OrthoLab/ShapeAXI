@@ -550,10 +550,6 @@ def GetRandomColoredActor(surf, property_name, range_scalars = [0, 1000]):
     return actor
 
 def GetSeparateColoredActor(surf, property_name, range_scalars = [0, 60]):
-    # dico = {}
-    # for i in range(60):
-    #     dico[i] = [np.random.rand(), np.random.rand(), np.random.rand()]
-    # print(dico)
 
     if range_scalars == None:
         range_scalars = surf.GetPointData().GetScalars(property_name).GetRange()

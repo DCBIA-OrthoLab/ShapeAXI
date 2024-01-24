@@ -15,7 +15,6 @@ import plotly.express as px
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 import pandas as pd
-import seaborn
 import cv2
 from pytorch3d.renderer import (
         FoVPerspectiveCameras, look_at_view_transform, look_at_rotation, 
@@ -30,23 +29,7 @@ import os
 from . import utils
 from .IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
 from .saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, SelfAttention, Identity, TimeDistributed
-
-
-class bcolors:
-    HEADER = '\033[95m'
-    #blue
-    PROC = '\033[94m'
-    #CYAN
-    INFO = '\033[96m'
-    #green
-    SUCCESS = '\033[92m'
-    #yellow
-    WARNING = '\033[93m'
-    #red
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+from .colors import bcolors
 
 
 class ProjectionHead(nn.Module):
@@ -110,6 +93,7 @@ class SelfAttention(nn.Module):
 
 
 ########################################################################## CLASSIFICATION PART ######################################################################################
+
 
 class SaxiClassification(pl.LightningModule):
     # Saxi classification network
@@ -236,8 +220,6 @@ class SaxiClassification(pl.LightningModule):
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
         self.accuracy(x, Y)
         self.log("val_acc", self.accuracy, batch_size=batch_size, sync_dist=True)
-
-
 
 
 ################################################################################ SAXIREGRESSION PART ################################################################################
@@ -375,8 +357,8 @@ class SaxiRegression(pl.LightningModule):
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
 
 
-
 #################################################################################### MONAIUNET PART #########################################################################################
+
 
 class MonaiUNet(pl.LightningModule):
     # Monai UNet network
@@ -527,6 +509,7 @@ class MonaiUNet(pl.LightningModule):
 
 ########################################################################################### ICOCONV PART ########################################################################################
 
+
 class SaxiIcoClassification(pl.LightningModule):
     def __init__(self, **kwargs):
         super(SaxiIcoClassification, self).__init__()
@@ -593,18 +576,25 @@ class SaxiIcoClassification(pl.LightningModule):
         rasterizer = MeshRasterizer(
                 cameras=self.hparams.cameras,
                 raster_settings=raster_settings
-            )
+        )
+
         self.hparams.phong_renderer = MeshRendererWithFragments(
             rasterizer=rasterizer,
             shader=HardPhongShader(cameras=self.hparams.cameras, lights=lights)
         )
+        
+    
+    def to(self, device=None):
+        # Move the renderer to the specified device
+        self.hparams.phong_renderer = self.hparams.phong_renderer.to(device)
+        return super().to(device)
 
     
     # Create an icosphere
     def create_network(self, side, out_size):
         if hasattr(torchvision.models, self.hparams.base_encoder):
             template_model = getattr(torchvision.models, self.hparams.base_encoder)
-            print('Torvision network')
+            print('Torchvision network')
         else:
             raise f"{self.hparams.base_encoder} not in monai networks or torchvision"
 
@@ -786,6 +776,7 @@ class SaxiIcoClassification(pl.LightningModule):
 
 #################################################################################### SEGMENTATION PART ########################################################################
 
+
 class SaxiSegmentation(pl.LightningModule):
     # Saxi segmentation network
     def __init__(self, args = None, out_channels=3, class_weights=None, image_size=320, radius=1.35, subdivision_level=1, train_sphere_samples=4):
@@ -916,18 +907,26 @@ class SaxiSegmentation(pl.LightningModule):
 
 #################################################################### DENTAL MODEL SEGMENTATION #########################################################################################
 
+
 class DentalModelSeg(pl.LightningModule):
-    def __init__(self, image_size=320, radius=1.35, subdivision_level=2, train_sphere_samples=4):
+    def __init__(self, image_size=320, radius=1.35, subdivision_level=2, train_sphere_samples=4, custom_model=None, device='cuda:0'):
         super(DentalModelSeg, self).__init__()        
         self.save_hyperparameters()        
         self.config_path = os.path.join(os.path.dirname(__file__), "config.json")
         self.out_channels = 34
         self.class_weights = None
+        self.custom_model = custom_model
 
-        #Initialize and load model
-        unet = self.create_unet_model()
-        model_loaded = self.dental_model_seg(unet)
-        self.model = TimeDistributed(model_loaded)
+        model = self.create_unet_model()
+
+        if custom_model is not None:
+            # Use the provided custom model
+            custom_model = self.dental_model_seg_args(model)
+            self.model = TimeDistributed(custom_model)
+        else:
+            # Use the default UNet model
+            model_loaded = self.dental_model_seg(model)
+            self.model = TimeDistributed(model_loaded)
         
 
         ico_verts, ico_faces, ico_edges = utils.PolyDataToTensors(utils.CreateIcosahedron(radius=radius, sl=subdivision_level))
@@ -968,6 +967,12 @@ class DentalModelSeg(pl.LightningModule):
             model.load_state_dict(state_dict)
             print(bcolors.INFO, "Model loaded successfully", bcolors.ENDC)
             return model
+    
+    def dental_model_seg_args(self, model):
+        state_dict = torch.load(self.custom_model)
+        model.load_state_dict(state_dict)
+        print(bcolors.INFO, "Model loaded successfully", bcolors.ENDC)
+        return model
 
     def to(self, device=None):
         # Move the renderer to the specified device
@@ -1006,7 +1011,7 @@ class DentalModelSeg(pl.LightningModule):
         PF = torch.cat(PF, dim=1)        
 
         return X, PF
-
+    
     def configure_optimizers(self):
         pass
 

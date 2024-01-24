@@ -17,16 +17,16 @@ from sklearn.utils import class_weight
 from pl_bolts.models.self_supervised import Moco_v2
 
 
-from .saxi_dataset import SaxiDataModule, SaxiDataset, BrainIBISDataModule
-from .saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-from .saxi_nets import MonaiUNet, SaxiIcoClassification
-from .saxi_logger import SaxiImageLogger, TeethNetImageLogger, ImageLogger
+from shapeaxi.saxi_dataset import SaxiDataModule, SaxiDataset, BrainIBISDataModule
+from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
+from shapeaxi import saxi_nets
+from shapeaxi.saxi_nets import MonaiUNet, SaxiIcoClassification
+from shapeaxi.saxi_logger import SaxiImageLogger, TeethNetImageLogger, ImageLogger
 
 # Training machine learning models
 
-def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test):
+def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback):
     #Initialize the dataset and corresponding data loader for training and validation
-    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
     callbacks = [early_stop_callback, checkpoint_callback]
     saxi_args = vars(args)
 
@@ -82,7 +82,8 @@ def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_poi
     trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
 
 
-def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test):
+
+def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, logger, early_stop_callback):
      # The dataset and corresponding data loader are initialized for training and validation
     class_weights = None
 
@@ -98,12 +99,6 @@ def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_
                         valid_transform = UnitSurfTransform(),
                         test_transform = UnitSurfTransform())
 
-    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
-    logger=None
-    
-    if args.tb_dir:
-        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
-
     image_logger = TeethNetImageLogger()
     model = MonaiUNet(args, out_channels = 34, class_weights=class_weights, image_size=320, train_sphere_samples=args.train_sphere_samples)
 
@@ -117,10 +112,12 @@ def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_
     )
 
     trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
-    trainer.test(datamodule=saxi_data)
+    # trainer.test(datamodule=saxi_data)
 
 
-def SaxiIcoClassification_train(args):
+
+def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, val, test, logger, early_stop_callback):
+
     list_path_ico = [args.path_ico_left,args.path_ico_right]
 
     #Demographics
@@ -145,7 +142,11 @@ def SaxiIcoClassification_train(args):
     nb_images = list_nb_verts_ico[args.ico_lvl-1]
     
     #Creation of Dataset
-    brain_data = BrainIBISDataModule(args.batch_size,list_demographic,args.csv_train,args.csv_valid,args.csv_test,list_path_ico,train_transform = train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers)#MLR
+    brain_data = BrainIBISDataModule(args.batch_size,list_demographic,train,val,test,list_path_ico,
+                                    train_transform = train_transform,
+                                    val_and_test_transform=val_and_test_transform,
+                                    num_workers=args.num_workers)#MLR
+
     nbr_features = brain_data.get_features()
     weights = brain_data.get_weigths()
     nbr_demographic = brain_data.get_nbr_demographic()
@@ -165,26 +166,13 @@ def SaxiIcoClassification_train(args):
     SAXINETS = getattr(saxi_nets, args.nn)
     model = SAXINETS(**saxi_args)
 
-    #Creation of Checkpoint (if we want to save best models)
-    checkpoint_callback_loss = ModelCheckpoint(dirpath='Checkpoint/'+args.name,filename='{epoch}-{val_loss:.2f}',save_top_k=10,monitor='val_loss',)
-
-    #Logger (Useful if we use Tensorboard)
-    logger = TensorBoardLogger(save_dir="test_tensorboard", name="my_model")
-
-    #Early Stopping
-    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=args.min_delta_early_stopping, patience=args.patience_early_stopping, verbose=True, mode="min")
-
     #Image Logger (Useful if we use Tensorboard)
     image_logger = ImageLogger(num_features = nbr_features,num_images = nb_images,mean = 0,std=args.noise_lvl)
 
     #Trainer
-    trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=[early_stop_callback,checkpoint_callback_loss,image_logger],accelerator="gpu") #,accelerator="gpu"
+    trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=[early_stop_callback,checkpoint_callback,image_logger],accelerator="gpu") #,accelerator="gpu"
     trainer.fit(model,datamodule=brain_data)
-    trainer.test(model, datamodule=brain_data)
-    print('Number of features : ',nbr_features)
-
-    return model, brain_data, trainer
-
+    # trainer.test(model, datamodule=brain_data)
 
 
 def main(args):
@@ -196,19 +184,35 @@ def main(args):
         monitor='val_loss'
     )
 
-    mount_point = args.mount_point  
-    df_train = pd.read_csv(os.path.join(mount_point, args.csv_train))
-    df_val = pd.read_csv(os.path.join(mount_point, args.csv_valid))
-    df_test = pd.read_csv(os.path.join(mount_point, args.csv_test))
+    # Mount the dataset
+    mount_point = args.mount_point
+    path_train = os.path.join(mount_point, args.csv_train)
+    path_val = os.path.join(mount_point, args.csv_valid)
+    path_test = os.path.join(mount_point, args.csv_test)
+    
+    # Load the data
+    df_train = pd.read_csv(path_train)
+    df_val = pd.read_csv(path_val)
+    df_test = pd.read_csv(path_test)
 
+    #Create the logger for the training
+    if args.tb_dir:
+        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
+    else:
+        logger = TensorBoardLogger(save_dir=mount_point, name=args.tb_name)  
+    
+    #Early Stopping
+    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
+
+    # Train the model depending on the neural network
     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
-        SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test)
+        SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback)
 
     elif args.nn == "SaxiSegmentation":
-        SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test)
+        SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, logger, early_stop_callback)
     
     elif args.nn == "SaxiIcoClassification":
-        SaxiIcoClassification_train(args)
+        SaxiIcoClassification_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, logger, early_stop_callback)
     
     else:
         raise ValueError ("Unknown neural network name: {}, choose between SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification".format(args.nn))
@@ -221,71 +225,63 @@ def get_argparse():
     parser = argparse.ArgumentParser(description='Shape Analysis Explainability and Interpretability')
 
     ##Input
-    in_group = parser.add_argument_group('Input')
-    in_group.add_argument('--csv_train', help='CSV with column surf', type=str, required=True)    
-    in_group.add_argument('--csv_valid', help='CSV with column surf', type=str)
-    in_group.add_argument('--csv_test', help='CSV with column surf', type=str, required=True)        
-    in_group.add_argument('--surf_column', help='Surface column name', type=str, default="surf")
-    in_group.add_argument('--class_column', help='Class column name', type=str, default=None)
-    in_group.add_argument('--mount_point', help='Dataset mount directory', type=str, default="./")
-    in_group.add_argument('--num_workers', help='Number of workers for loading', type=int, default=4)
-    in_group.add_argument('--path_ico_left', type=str, default='./3DObject/sphere_f327680_v163842.vtk', help='Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)')
-    in_group.add_argument('--path_ico_right', type=str, default='./3DObject/sphere_f327680_v163842.vtk', help='Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)')
+    input_group = parser.add_argument_group('Input')
+    input_group.add_argument('--csv_train', type=str, help='CSV with column surf', required=True)    
+    input_group.add_argument('--csv_valid', type=str, help='CSV with column surf')
+    input_group.add_argument('--csv_test', type=str, help='CSV with column surf', required=True)        
+    input_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
+    input_group.add_argument('--class_column', type=str, help='Class column name', default=None)
+    input_group.add_argument('--mount_point', type=str, help='Dataset mount directory', default="./")
+    input_group.add_argument('--num_workers', type=int, help='Number of workers for loading', default=4)
+    input_group.add_argument('--path_ico_left', type=str, help='Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk')
+    input_group.add_argument('--path_ico_right', type=str, help='Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk')
 
     ##Model
     model_group = parser.add_argument_group('Input model')
-    model_group.add_argument('--model', help='Model to continue training', type=str, default= None)
+    model_group.add_argument('--model', type=str, help='Model to continue training', default=None)
 
     ##Hyperparameters
     hyper_group = parser.add_argument_group('Hyperparameters')
-    hyper_group.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', type=str, default='SaxiClassification')
-    hyper_group.add_argument('--base_encoder', help='Base encoder for the feature extraction', type=str, default='resnet18')
-    hyper_group.add_argument('--base_encoder_params', help='Base encoder parameters that are passed to build the feature extraction', type=str, default='pretrained=False,spatial_dims=2,n_input_channels=4,num_classes=512')
-    hyper_group.add_argument('--hidden_dim', help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', type=int, default=512)
-    hyper_group.add_argument('--radius', help='Radius of icosphere', type=float, default=1.35)    
-    hyper_group.add_argument('--subdivision_level', help='Subdivision level for icosahedron', type=int, default=1)
-    hyper_group.add_argument('--image_size', help='Image resolution size', type=int, default=256)
-    hyper_group.add_argument('--lr', '--learning-rate', default=1e-4, type=float, help='Learning rate')
-    hyper_group.add_argument('--epochs', help='Max number of epochs', type=int, default=200)   
-    hyper_group.add_argument('--batch_size', help='Batch size', type=int, default=3)    
-    hyper_group.add_argument('--train_sphere_samples', help='Number of training sphere samples or views used during training and validation', type=int, default=4)  
-    hyper_group.add_argument('--patience', help='Patience for early stopping', type=int, default=30)
-    hyper_group.add_argument('--scale_factor', help='Scale factor to rescale the shapes', type=float, default=1.0) 
-    hyper_group.add_argument('--noise_lvl', type=float, default=0.01, help='Noise level (default: 0.01)')
-    hyper_group.add_argument('--ico_lvl', type=int, default=2, help='Ico level, minimum level is 1 (default: 2)')
-    hyper_group.add_argument('--pretrained', type=bool, default=False, help='Pretrained (default: False)')
-    hyper_group.add_argument('--dropout_lvl', type=float, default=0.2, help='Dropout level (default: 0.2)')
+    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification"])
+    hyper_group.add_argument('--base_encoder', type=str, help='Base encoder for the feature extraction', default='resnet18')
+    hyper_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=4,num_classes=512')
+    hyper_group.add_argument('--hidden_dim', type=int, help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', default=512)
+    hyper_group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.35)    
+    hyper_group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=1)
+    hyper_group.add_argument('--image_size', type=int, help='Image resolution size', default=256)
+    hyper_group.add_argument('--lr', type=float, help='Learning rate', default=1e-4,)
+    hyper_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
+    hyper_group.add_argument('--batch_size', type=int, help='Batch size', default=3)    
+    hyper_group.add_argument('--train_sphere_samples', type=int, help='Number of training sphere samples or views used during training and validation', default=4)  
+    hyper_group.add_argument('--patience', type=int, help='Patience for early stopping', default=30)
+    hyper_group.add_argument('--scale_factor', type=float, help='Scale factor to rescale the shapes', default=1.0) 
+    hyper_group.add_argument('--noise_lvl', type=float, help='Noise level (default: 0.01)', default=0.01)
+    hyper_group.add_argument('--ico_lvl', type=int, help='Ico level, minimum level is 1 (default: 2)', default=2)
+    hyper_group.add_argument('--pretrained',  type=bool, help='Pretrained (default: False)', default=False)
+    hyper_group.add_argument('--dropout_lvl',  type=float, help='Dropout level (default: 0.2)', default=0.2)
+    hyper_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')
 
     ##Gaussian Filter
     gaussian_group = parser.add_argument_group('Gaussian filter')
-    gaussian_group.add_argument('--mean', type=float, default=0, help='Mean (default: 0)')
-    gaussian_group.add_argument('--std', type=float, default=0.005, help='Standard deviation (default: 0.005)')
+    gaussian_group.add_argument('--mean', type=float, help='Mean (default: 0)', default=0)
+    gaussian_group.add_argument('--std', type=float, help='Standard deviation (default: 0.005)', default=0.005)
 
-    ##Early Stopping
-    early_stopping_group = parser.add_argument_group('Early stopping')
-    early_stopping_group.add_argument('--min_delta_early_stopping', type=float, default=0.00, help='Minimum delta (default: 0.00)')
-    early_stopping_group.add_argument('--patience_early_stopping', type=int, default=100, help='Patience (default: 100)')
-    
-    ##Name and layer
-    name_group = parser.add_argument_group('Name and layer')
-    name_group.add_argument('--layer', type=str, default='IcoConv2D', help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)")
-    name_group.add_argument('--name', type=str, default='Experiment0', help='Name of your experiment (default: Experiment0)')
 
     ##Logger
     logger_group = parser.add_argument_group('Logger')
-    logger_group.add_argument('--log_every_n_steps', help='Log every n steps', type=int, default=10)    
-    logger_group.add_argument('--tb_dir', help='Tensorboard output dir', type=str, default=None)
-    logger_group.add_argument('--tb_name', help='Tensorboard experiment name', type=str, default=None)
-    logger_group.add_argument('--neptune_project', help='Neptune project', type=str, default=None)
-    logger_group.add_argument('--neptune_tags', help='Neptune tags', type=str, default=None)
+    logger_group.add_argument('--log_every_n_steps', type=int, help='Log every n steps', default=10)    
+    logger_group.add_argument('--tb_dir', type=str, help='Tensorboard output dir', default=None)
+    logger_group.add_argument('--tb_name', type=str, help='Tensorboard experiment name', default="tensorboard")
+    logger_group.add_argument('--neptune_project', type=str, help='Neptune project', default=None)
+    logger_group.add_argument('--neptune_tags', type=str, help='Neptune tags', default=None)
 
     ##Output
     out_group = parser.add_argument_group('Output')
-    out_group.add_argument('--out', help='Output', type=str, default="./")
+    out_group.add_argument('--out', type=str, help='Output', default="./")
 
     ##Debug
     debug_group = parser.add_argument_group('Debug')
-    debug_group.add_argument('--profiler', help='Use a profiler', type=str, default=None)
+    debug_group.add_argument('--profiler', type=str, help='Use a profiler', default=None)
 
     return parser
 

@@ -72,8 +72,8 @@ def main(args):
 def get_argparse():
     # Function to parse the arguments
     parser = argparse.ArgumentParser(description='Teeth challenge convert OBJ files to VTK. It adds the label information to each VTK file')
-    parser.add_argument('--csv', help='CSV with columns surf,label,split', type=str, required=True)
-    parser.add_argument('--out', help='Output directory', type=str, default="./")
+    parser.add_argument('--csv', type=str, help='CSV with columns surf,label,split', required=True)
+    parser.add_argument('--out', type=str, help='Output directory', default="./")
     return parser
 
 if __name__ == '__main__':

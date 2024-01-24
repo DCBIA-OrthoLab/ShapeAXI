@@ -73,7 +73,6 @@ class SaxiImageLoggerNeptune(Callback):
 # SaxiImageLoggerNeptune sends images to the Neptune platform for more advanced experiment tracking and visualization. 
 
 
-
 ######################################################################### SEGMENTATION PART #########################################################################################
 
 
@@ -156,11 +155,11 @@ class ImageLogger(Callback):
                 t_zeros = torch.ones(images[:,:,:1].shape).to(pl_module.device,non_blocking=True)*(images[:,:,:1] > 0.0)
 
                 images = torch.cat([images,t_zeros],dim=2)     
-                numpy_grid_images = self.grid_images(images)
+                numpy_grid_images = grid_images(images)
                 trainer.logger.experiment.add_image('Image features', numpy_grid_images, pl_module.global_step)
 
                 images_noiseM = pl_module.noise(images)
-                numpy_grid_images_noiseM = self.grid_images(images_noiseM)
+                numpy_grid_images_noiseM = grid_images(images_noiseM)
                 trainer.logger.experiment.add_image('Image + noise M ', numpy_grid_images_noiseM, pl_module.global_step)    
     
 

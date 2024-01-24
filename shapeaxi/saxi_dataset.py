@@ -72,7 +72,8 @@ class SaxiDataset(Dataset):
         return verts, faces, color_normals
 
     def getSurf(self, idx):
-        surf_path = f'{self.mount_point}/{self.df.iloc[idx][self.surf_column]}'
+        # surf_path = f'{self.mount_point}/{self.df.iloc[idx][self.surf_column]}'
+        surf_path = os.path.join(self.mount_point, self.df.iloc[idx][self.surf_column])
         return utils.ReadSurf(surf_path)
 
 
@@ -139,6 +140,7 @@ class SaxiDataModule(pl.LightningDataModule):
             color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)
 
             return verts, faces, verts_data_faces, color_normals
+
 
 
 class SaxiTimepointsDataset(Dataset):
@@ -269,7 +271,7 @@ class BrainIBISDataset(Dataset):
         
         face_features = torch.take(vertex_features,faces_pid0_offset)
 
-        return verts, faces,vertex_features,face_features,demographic, Y
+        return verts, faces, vertex_features, face_features, demographic, Y
 
 
 

@@ -6,12 +6,13 @@ from sklearn.model_selection import train_test_split
 
 # Split the initial dataset into training, validation and test subsets for each fold
 
-def check_input_file(fname):
+def check_input_file(args, fname):
     csv = True
+    path = os.path.join(args.mount_point, fname)
     if(os.path.splitext(fname)[1] == ".csv"):
-        df = pd.read_csv(fname)
+        df = pd.read_csv(path)
     elif(os.path.splitext(fname)[1] == ".parquet"):
-        df = pd.read_parquet(fname)
+        df = pd.read_parquet(path)
         csv = False
     else:
         print("File format not supported : .csv or .parquet")
@@ -22,7 +23,7 @@ def check_input_file(fname):
 
 def first_split_data(args):
     fname = args.csv
-    csv, df = check_input_file(fname)
+    csv, df = check_input_file(args, fname)
 
     if csv:
         # Split the data into train and test sets (80/20 by default)
@@ -30,24 +31,26 @@ def first_split_data(args):
         # Save the data into CSV files
         train_fn = fname.replace('.csv', '_train.csv')
         test_fn = fname.replace('.csv', '_test.csv')
-        train_df.to_csv(train_fn, index=False)
-        test_df.to_csv(test_fn, index=False)
+        path_to_save_train = os.path.join(args.mount_point, train_fn)
+        path_to_save_test = os.path.join(args.mount_point, test_fn)
+        train_df.to_csv(path_to_save_train, index=False)
+        test_df.to_csv(path_to_save_test, index=False)
 
     else:
-        # Split the data into train and test sets (80/20 by default)
         train_df, test_df = train_test_split(df, test_size=args.split)
-        # Save the data into CSV files
         train_fn = fname.replace('.parquet', '_train.parquet')
         test_fn = fname.replace('.parquet', '_test.parquet')
-        train_df.to_csv(train_fn, index=False)
-        test_df.to_csv(test_fn, index=False)
+        path_to_save_train = os.path.join(args.mount_point, train_fn)
+        path_to_save_test = os.path.join(args.mount_point, test_fn)
+        train_df.to_csv(path_to_save_train, index=False)
+        test_df.to_csv(path_to_save_test, index=False)
 
 
 ################################################# Split the data into training and test sets for each fold ####################################################################################################
 
 def split_data_folds_test_train(args):
     fname = args.csv
-    csv, df = check_input_file(fname)
+    csv, df = check_input_file(args, fname)
     split, df_split = check_split(args)
 
     if args.group_by:
@@ -71,7 +74,7 @@ def split_data_folds_test_train(args):
             df_train = df[~df[args.group_by].isin(id_test)]
             df_test = df[df[args.group_by].isin(id_test)]
 
-            save_data_folds(df_train,df_test,fname,csv,i)
+            save_data_folds(args,df_train,df_test,fname,csv,i)
 
             start_f += samples
             end_f += samples
@@ -89,7 +92,7 @@ def split_data_folds_test_train(args):
             df_train = df[~df.index.isin(id_test)]
             df_test = df.iloc[id_test]
 
-            save_data_folds(df_train,df_test,fname,csv,i)
+            save_data_folds(args,df_train,df_test,fname,csv,i)
 
             start_f += samples
             end_f += samples
@@ -99,7 +102,7 @@ def split_data_folds_test_train(args):
 
 def split_data_folds_train_eval(args):
     fname = args.csv
-    csv, df = check_input_file(fname)
+    csv, df = check_input_file(args, fname)
     split, df_split = check_split(args)
 
     if args.group_by:
@@ -118,7 +121,7 @@ def split_data_folds_train_eval(args):
         df_train = df[df[args.group_by].isin(id_train)]
         df_test = df[df[args.group_by].isin(id_test)]
 
-        save_data(df_train,df_test,fname,csv)
+        save_data(args,df_train,df_test,fname,csv)
 
     else:
         # If there is no column to group by, split the data randomly
@@ -130,33 +133,41 @@ def split_data_folds_train_eval(args):
         df_train = df.iloc[id_train]
         df_test = df.iloc[id_test]
 
-        save_data(df_train,df_test,fname,csv)
+        save_data(args,df_train,df_test,fname,csv)
 
 
-def save_data(df_train,df_test,fname,csv):
+def save_data(args,df_train,df_test,fname,csv):
     if csv:
-        train = fname.replace('.csv', '_train.csv')
-        df_train.to_csv(train, index=False)
+        train_fn = fname.replace('.csv', '_train.csv')
+        path_to_save_train = os.path.join(args.mount_point, train_fn)
+        df_train.to_csv(path_to_save_train, index=False)
         eval_fn = fname.replace('.csv', '_test.csv')
-        df_test.to_csv(eval_fn, index=False)
+        path_to_save_eval = os.path.join(args.mount_point, eval_fn)
+        df_test.to_csv(path_to_save_eval, index=False)
     else:
         train_fn = fname.replace('.parquet', '_train.parquet')
-        df_train.to_parquet(train_fn, index=False)
+        path_to_save_train = os.path.join(args.mount_point, train_fn)
+        df_train.to_parquet(path_to_save_train, index=False)
         eval_fn = fname.replace('.parquet', '_test.parquet')
-        df_test.to_parquet(eval_fn, index=False)
+        path_to_save_eval = os.path.join(args.mount_point, eval_fn)
+        df_test.to_parquet(path_to_save_eval, index=False)
 
 
-def save_data_folds(df_train,df_test,fname,csv,i):
+def save_data_folds(args,df_train,df_test,fname,csv,i):
     if csv:
-        train = fname.replace('.csv', '_fold' + str(i) + '_train.csv')
-        df_train.to_csv(train, index=False)
+        train_fn = fname.replace('.csv', '_fold' + str(i) + '_train.csv')
+        path_to_save_train = os.path.join(args.mount_point, train_fn)
+        df_train.to_csv(path_to_save_train, index=False)
         eval_fn = fname.replace('.csv', '_fold' + str(i) + '_test.csv')
-        df_test.to_csv(eval_fn, index=False)
+        path_to_save_eval = os.path.join(args.mount_point, eval_fn)
+        df_test.to_csv(path_to_save_eval, index=False)
     else:
         train_fn = fname.replace('.parquet', '_fold' + str(i) + '_train.parquet')
-        df_train.to_parquet(train_fn, index=False)
+        path_to_save_train = os.path.join(args.mount_point, train_fn)
+        df_train.to_parquet(path_to_save_train, index=False)
         eval_fn = fname.replace('.parquet', '_fold' + str(i) + '_test.parquet')
-        df_test.to_parquet(eval_fn, index=False)
+        path_to_save_eval = os.path.join(args.mount_point, eval_fn)
+        df_test.to_parquet(path_to_save_eval, index=False)
 
 
 def check_split(args):
@@ -173,6 +184,7 @@ def get_argparse():
     # The arguments are defined for the script
     parser = argparse.ArgumentParser(description='Splits data into train/eval', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--csv', type=str, help='CSV file', required=True)
+    parser.add_argument('--mount_point', type=str, help='Mount point', default="./")
     parser.add_argument('--split', type=float, help='Split float [0-1]', default=0.2)
     parser.add_argument('--group_by', type=str, help='Group the rows by column', default=None)
     parser.add_argument('--folds', type=int, help='Number of folds to generate', default=0)

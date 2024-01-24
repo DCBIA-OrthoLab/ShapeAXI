@@ -24,6 +24,7 @@ import plotly.express as px
 
 from . import utils
 from .saxi_train import SaxiIcoClassification_train
+from .colors import bcolors
 
 # This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
@@ -54,13 +55,29 @@ def plot_confusion_matrix(cm, classes,normalize=False,title='Confusion matrix',c
     plt.tight_layout()
 
     return cm
-  
-
-def SaxiIcoClassification_eval():
-    print("Not implemented yet")
 
 
-def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr):
+def choose_score(args,report):
+    if args.eval_metric == 'F1':
+      # Calculate F1 score
+      weighted_f1_score = report["weighted avg"]["f1-score"]
+      # Print or store F1 score
+      print(bcolors.PROC, "Weighted F1 Score:", weighted_f1_score, bcolors.ENDC)
+      return weighted_f1_score
+
+    elif args.eval_metric == 'AUC':
+      # Calculate AUC score
+      weighted_auc_score = report["weighted avg"]["auc"]
+      # Print or store AUC score
+      print(bcolors.PROC, "Weighted AUC Score:", weighted_auc_score, bcolors.ENDC)
+      return weighted_auc_score
+
+    else:
+      sys.exit("The value of score is not F1 or AUC. You must specify F1 or AUC.")
+
+
+
+def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
     # For the classification, evaluating a classification model, generating classification metrics, creating confusion matrix visualizations
     # It also responsible for plotting ROC curves, aggregating and reporting classification metrics in a structured format
     if(args.csv_tag_column):
@@ -71,7 +88,7 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr):
       class_names.sort()
 
     for idx, row in df.iterrows():
-      y_true_arr.append(row[args.csv_true_column])
+      y_true_arr.append(row[args.class_column])
       y_pred_arr.append(row[args.csv_prediction_column])
 
     report = classification_report(y_true_arr, y_pred_arr, output_dict=True)
@@ -84,7 +101,7 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr):
     fig = plt.figure(figsize=args.figsize)
 
     plot_confusion_matrix(cnf_matrix, classes=class_names, title=args.title)
-    confusion_filename = os.path.splitext(args.csv)[0] + "_confusion.png"
+    confusion_filename = os.path.splitext(path_to_csv)[0] + "_confusion.png"
     fig.savefig(confusion_filename)
 
 
@@ -92,15 +109,13 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr):
     fig2 = plt.figure(figsize=args.figsize)
     cm = plot_confusion_matrix(cnf_matrix, classes=class_names, normalize=True, title=args.title + ' - normalized')
 
-    norm_confusion_filename = os.path.splitext(args.csv)[0] + "_norm_confusion.png"
+    norm_confusion_filename = os.path.splitext(path_to_csv)[0] + "_norm_confusion.png"
     fig2.savefig(norm_confusion_filename)
 
 
     probs_fn = args.csv.replace("_prediction.csv", "_probs.pickle")
-    # print(probs_fn, os.path.splitext(probs_fn)[1])
+
     if os.path.exists(probs_fn) and os.path.splitext(probs_fn)[1] == ".pickle":
-      
-      # print("Reading:", probs_fn)
 
       with open(probs_fn, 'rb') as f:
         y_scores = pickle.load(f)
@@ -136,7 +151,7 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr):
           width=700, height=500
       )
 
-      roc_filename = os.path.splitext(args.csv)[0] + "_roc.png"
+      roc_filename = os.path.splitext(path_to_csv)[0] + "_roc.png"
 
       fig.write_image(roc_filename)
 
@@ -153,30 +168,28 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr):
       report["weighted avg"]["auc"] = np.average(auc, weights=support) 
           
       df_report = pd.DataFrame(report).transpose()
-      report_filename = os.path.splitext(args.csv)[0] + "_classification_report.csv"
+      report_filename = os.path.splitext(path_to_csv)[0] + "_classification_report.csv"
       df_report.to_csv(report_filename)
-      
-      # Calculate F1 score
-      weighted_f1_score = report["weighted avg"]["f1-score"]
 
-      # Print or store F1 score
-      print("Weighted F1 Score:", weighted_f1_score)
-
-      # Return the F1 score or any other relevant metric
-      return weighted_f1_score
+      # Extraction of the score (AUC or F1)
+      score = choose_score(args,report)
+      return score
 
 
-def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr):
+############################################################################### SEGMENTATION EVALUATION ###############################################################################
+
+
+def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
    # For the segmentation, evaluating a segmentation model, generating segmentation metrics, creating confusion matrix visualizations
     dice_arr = []
-    df = pd.read_csv(args.csv)
 
     for idx, row in df.iterrows():
-
-      print("Reading:", row["surf"])
-      surf = utils.ReadSurf(row["surf"])
-      print("Reading:", row["pred"])
-      pred = utils.ReadSurf(row["pred"])
+      path_surf = os.path.join(args.mount_point, row["surf"])
+      print("Reading:", path_surf)
+      surf = utils.ReadSurf(path_surf)
+      path_pred = os.path.join(args.mount_point, row["pred"])
+      print("Reading:", path_pred)
+      pred = utils.ReadSurf(path_pred)
       surf_features_np = vtk_to_numpy(surf.GetPointData().GetScalars(args.surf_id))
       pred_features_np = vtk_to_numpy(pred.GetPointData().GetScalars(args.pred_id))
       pred_features_np[pred_features_np==-1] = 1
@@ -200,7 +213,6 @@ def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr):
     dice_arr = np.array(dice_arr)
     cnf_matrix = confusion_matrix(y_true_arr, y_pred_arr)
     fig = plt.figure(figsize=(20, 20))
-    # plot_confusion_matrix(cnf_matrix, classes=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16","33"], title="Confusion Matrix Segmentation")
     plot_confusion_matrix(cnf_matrix, classes=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16","17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32","33"], title="Confusion Matrix Segmentation")
     confusion_filename = os.path.splitext(args.csv)[0] + "_confusion.png"
     fig.savefig(confusion_filename)
@@ -246,76 +258,67 @@ def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr):
     print(f'average dice : {sum(l_dice)/len(l_dice)}')
     # Plot normalized confusion matrix
     fig2 = plt.figure(figsize=(20, 20))
-    # cm = plot_confusion_matrix(cnf_matrix, classes=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16","33"], normalize=True, title="Confusion Matrix Segmentation - normalized")
     cm = plot_confusion_matrix(cnf_matrix, classes=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16","17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32","33"], normalize=True, title="Confusion Matrix Segmentation - normalized")
     norm_confusion_filename = os.path.splitext(args.csv)[0] + "_norm_confusion.png"
-    #plt.show()
     fig2.savefig(norm_confusion_filename)
     fig3 = plt.figure() 
     # Creating plot
     print("Dice coefficient shape : ", dice_arr.shape)
-    #dice_del = np.delete(dice_arr,[0,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32],1) # upper
     dice_del = np.delete(dice_arr,[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,31,32],1)
-    #print(dice_del.shape)
     s = sns.violinplot(data=dice_del, scale='count',cut=0)
-    #plt.xticks([0, 1, 2, 3, 4, 5, 6,7,8], ["1", "2", "3", "4", "5", "6", "7","8", "9"])
     plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["18", "19", "20", "21", "22", "23","24","25","26","27","28","29","30","31"]) # lower
-    #plt.xticks([0,1a, 2, 3, 4, 5, 6,7,8,9,10,11,12,13], ["2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15"]) # upper
-    #plt.xticks([0,1, 2, 3, 4, 5, 6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32], ["1","2", "3", "4", "5", "6", "7","8","9","10","11","12","13","14","15","16","17", "18", "19", "20", "21", "22","23","24","25","26","27","28","29","30","31","32","33"]) # lower
     s.set_title('Dice coefficients: lower jaw')
-    box_plot_filename = os.path.splitext(args.csv)[0] + "_violin_plot.png"
+    box_plot_filename = os.path.splitext(path_to_csv)[0] + "_violin_plot.png"
     ax = plt.gca()
     ax.set_ylim([0.75, 1.005])
     plt.show()
     fig3.savefig(box_plot_filename)
-    # Access the weighted f1-score
-    weighted_f1_score = report['weighted avg']['f1-score']
-    # Print or store F1 score
-    print("Weighted F1 Score:", weighted_f1_score)
-    # Return the F1 score or any other relevant metric
-    return weighted_f1_score
 
 
-def SaxiRegression_eval(df, args, y_true_arr, y_pred_arr):
+    # Extraction of the score (AUC or F1)
+    score = choose_score(args,report)
+
+    return score
+
+############################################################################### REGRESSION EVALUATION ###############################################################################
+
+def SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
    #Visualization of the distribution of absolute errors and prediction errors
     y_true_arr = [] 
     y_pred_arr = []
 
-    if(os.path.splitext(args.csv)[1] == ".csv"):        
-        df = pd.read_csv(args.csv)
-    else:        
-        df = pd.read_parquet(args.csv)
-
-    y_true_arr = df[args.csv_true_column]
+    y_true_arr = df[args.class_column]
     y_pred_arr = df[args.csv_prediction_column]
     df['abs'] = np.abs(y_true_arr - y_pred_arr)
     df['error'] = y_true_arr - y_pred_arr
     fig = px.violin(df, y="abs")
-    abs_filename = os.path.splitext(args.csv)[0] + "_abs.png"
+    abs_filename = os.path.splitext(path_to_csv)[0] + "_abs.png"
     fig.write_image(abs_filename)
 
     fig = px.violin(df, y="error")
-    error_filename = os.path.splitext(args.csv)[0] + "_error.png"
+    error_filename = os.path.splitext(path_to_csv)[0] + "_error.png"
     fig.write_image(error_filename)
+
 
 
 def main(args):
     y_true_arr = [] 
     y_pred_arr = []
 
+    path_to_csv = os.path.join(args.mount_point, args.csv)
     if(os.path.splitext(args.csv)[1] == ".csv"):        
-        df = pd.read_csv(args.csv)
+        df = pd.read_csv(path_to_csv)
     else:        
-        df = pd.read_parquet(args.csv)
+        df = pd.read_parquet(path_to_csv)
 
-    if args.nn == "SaxiClassification":
-      f1_score = SaxiClassification_eval(df, args, y_true_arr, y_pred_arr)
+    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification":
+      score = SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
 
     elif args.nn == "SaxiSegmentation":
-      f1_score = SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr)
+      score = SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
 
     elif args.nn == "SaxiRegression":
-      f1_score = SaxiRegression_eval(df, args, y_true_arr, y_pred_arr)
+      score = SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
     
     elif args.nn == "SaxiIcoClassification":
       SaxiIcoClasssification_eval()
@@ -323,7 +326,7 @@ def main(args):
     else:
       raise NotImplementedError(f"Neural network {args.nn} is not implemented")
 
-    return f1_score
+    return score
 
 
 
@@ -332,14 +335,16 @@ def get_argparse():
   parser = argparse.ArgumentParser(description='Evaluate classification result', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
   parser.add_argument('--csv', type=str, help='CSV file', required=True)
-  parser.add_argument('--csv_true_column', type=str, help='Which column to do the stats on', default="class")
+  parser.add_argument('--class_column', type=str, help='Which column to do the stats on', default='class')
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', type=str, default='SaxiClassification')
-  parser.add_argument('--title', type=str, help='Title for the image', default="Confusion matrix")
-  parser.add_argument('--figsize', type=float, nargs='+', help='Figure size', default=(6.4, 4.8))
-  parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default="UniversalID")
-  parser.add_argument('--pred_id', type=str, help='Name of array in point data for the predicted labels', default="PredictedID")
+  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification'])
+  parser.add_argument('--title', type=str, help='Title for the image', default='Confusion matrix')
+  parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
+  parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')
+  parser.add_argument('--pred_id', type=str, help='Name of array in point data for the predicted labels', default='PredictedID')
+  parser.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1 or AUC', default='F1', choices=['F1', 'AUC'])
+  parser.add_argument('--mount_point', type=str, help='Mount point for the data', default='./')
 
   return parser
 

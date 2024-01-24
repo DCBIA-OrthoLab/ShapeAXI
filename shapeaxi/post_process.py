@@ -146,6 +146,7 @@ def NeighborPoints(vtkdata,CurrentID):
 	all_neighbor_pid = np.unique(all_neighbor_pid)
 	return all_neighbor_pid
 
+
 def GetBoundaries(vtkdata, label_array, label1, label2, Set_label):
 	# Set a label 'Set_label' each time label1 and label2 are connected
 	for pid in range(vtkdata.GetNumberOfPoints()):
