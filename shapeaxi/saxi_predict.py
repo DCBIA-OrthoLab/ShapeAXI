@@ -12,12 +12,12 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 import nrrd
 import monai
 
-from . import saxi_nets, utils
-from .saxi_dataset import SaxiDataset, BrainIBISDataset
-from .saxi_transforms import EvalTransform, UnitSurfTransform, TrainTransform, RandomRemoveTeethTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-from .post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
-from .dental_model_seg import segmentation_crown, post_processing
-from .colors import bcolors
+import saxi_nets, utils
+from saxi_dataset import SaxiDataset, BrainIBISDataset
+from saxi_transforms import EvalTransform, UnitSurfTransform, TrainTransform, RandomRemoveTeethTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
+from post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
+from dental_model_seg import segmentation_crown, post_processing
+from colors import bcolors
 
 
 # This file proposes a prediction with the test data. It calls SaxiDataset which is a custom class from PyTorch that inherits from torch.utils.data.Datset.

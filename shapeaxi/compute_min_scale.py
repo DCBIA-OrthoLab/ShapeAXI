@@ -6,7 +6,7 @@ import argparse
 import json
 from tqdm import tqdm
 
-from . import utils
+import utils
 
 # This file reads a CSV file, process its data to compute the minimum magnitude/scaling factor for all shapes, and save the results back to a CSV file
 

@@ -23,9 +23,9 @@ from tqdm import tqdm
 from sklearn.utils import class_weight
 
 
-from .utils import ReadSurf, PolyDataToTensors
-from .saxi_nets import IcoConv
-from .saxi_dataset import BrainIBISDataModule
+from utils import ReadSurf, PolyDataToTensors
+from saxi_nets import IcoConv
+from saxi_dataset import BrainIBISDataModule
 
 def get_epoch(name_model):
     epoch = ''

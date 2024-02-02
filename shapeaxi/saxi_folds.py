@@ -9,8 +9,8 @@ import numpy as np
 import pickle 
 
 
-from . import compute_min_scale, split_train_eval, saxi_eval, saxi_predict, saxi_train, saxi_gradcam
-from .colors import bcolors
+import compute_min_scale, split_train_eval, saxi_eval, saxi_predict, saxi_train, saxi_gradcam
+from colors import bcolors
 
 def get_last_checkpoint(checkpoint_dir):
     # Get the last checkpoint
@@ -78,7 +78,8 @@ def aggregate(ext, args, f, out_prediction_agg):
 
 
 def main(args, arg_groups):
-    # Main function
+
+    #Main function
     create_folds = False
     scale_factor = None
     
@@ -241,7 +242,6 @@ def main(args, arg_groups):
         print(bcolors.SUCCESS, "End training for fold {f}".format(f=f), bcolors.ENDC)
 
 #################################################################################### TEST PART #####################################################################################################
-
     for f in range(0, args.folds):
         #Test the model for each fold
         print(bcolors.INFO, "Start test for fold {f}".format(f=f), bcolors.ENDC)
@@ -250,6 +250,7 @@ def main(args, arg_groups):
         else:
             csv_test = args.csv_train.replace(ext, '_fold{f}_test.csv').format(f=f)
         saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))
+        print(saxi_train_args_out)
         best_model_path = get_best_checkpoint(saxi_train_args_out)
         saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
         
@@ -400,7 +401,7 @@ def main(args, arg_groups):
             saxi_gradcam.main(saxi_gradcam_args)
 
 
-        elif args.nn == "SaxiIcoClassification":
+        elif args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs":
             
             if args.csv is not None:
                 csv_train = args.csv.replace(ext, '_train_fold{f}_train_train.csv').format(f=f)
@@ -503,7 +504,7 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs'])
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--train_sphere_samples', type=int, help='Number of samples for the training sphere', default=10000)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
@@ -531,6 +532,9 @@ def cml():
     train_group.add_argument('--path_ico_right', type=str, help='Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk')
     train_group.add_argument('--path_ico_left', type=str, help='Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk',)
     train_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')
+    train_group.add_argument('--fs_path', type=str, help='Path to freesurfer folder', default=None)
+    train_group.add_argument('--num_images', type=int, help='Number of images to use for the training', default=12)
+
 
     # Arguments used for prediction
     pred_group = parser.add_argument_group('Prediction group')

@@ -68,9 +68,50 @@ class SaxiImageLoggerNeptune(Callback):
                 trainer.logger.experiment["images/x_depth"].upload(fig)
                 plt.close()
 
-# The difference is the backend used for image logging and visualization.
-# SaxiImageLogger logs images directly within the PyTorch Lightning logging system.
-# SaxiImageLoggerNeptune sends images to the Neptune platform for more advanced experiment tracking and visualization. 
+
+##################################################################### ICOCONV FREESURFER PART #######################################################################################
+
+class SaxiImageLoggerNeptune_Ico_fs(Callback):
+    # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
+    def __init__(self, num_images=12, log_steps=10):
+        self.log_steps = log_steps
+        self.num_images = num_images
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
+        # This function is called at the end of each training batch
+        if batch_idx % self.log_steps == 0:
+
+            VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
+
+            batch_size = 3
+            print("coucou")
+            num_images = min(batch_size, self.num_images)
+
+            VL = VL.to(pl_module.device,non_blocking=True)
+            FL = FL.to(pl_module.device,non_blocking=True)
+            VFL = VFL.to(sepl_modulel.device,non_blocking=True).to(torch.float32)
+            FFL = FFL.to(pl_module.device,non_blocking=True)
+            VR = VR.to(pl_module.device,non_blocking=True)
+            FR = FR.to(pl_module.device,non_blocking=True)
+            VFR = VFR.to(pl_module.device,non_blocking=True).to(torch.float32)
+            FFR = FFR.to(pl_module.device,non_blocking=True)
+
+            with torch.no_grad():
+                # Render the input surface mesh to an image
+                X, PF = pl_module.render(VL[0:1], FL[0:1], VFL[0:1], FFL[0:1])
+                print(X.shape)
+
+                grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 0:3, :, :])#Grab the first image, RGB channels only, X, Y. The time dimension is on dim=1
+                fig = plt.figure(figsize=(7, 9))
+                ax = plt.imshow(grid_X.permute(1, 2, 0).cpu().numpy())
+                trainer.logger.experiment["images/x"].upload(fig)
+                plt.close()
+                
+                grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 3:, :, :])#Grab the depth map. The time dimension is
+                fig = plt.figure(figsize=(7, 9))
+                ax = plt.imshow(grid_X.permute(1, 2, 0).cpu().numpy())
+                trainer.logger.experiment["images/x_depth"].upload(fig)
+                plt.close()
 
 
 ######################################################################### SEGMENTATION PART #########################################################################################
@@ -114,7 +155,6 @@ class TeethNetImageLogger(Callback):
                     grid_y = torchvision.utils.make_grid(y[0, 0:num_images, :, :, :]/pl_module.out_channels)# The time dimension here is swapped after the permute and is on dim=2. It will grab the first image
                     grid_y = grid_y.cpu().numpy()
                     trainer.logger.experiment.add_image('Y', grid_y, pl_module.global_step)
-
 
 
 ######################################################################### ICOCONV PART #########################################################################################

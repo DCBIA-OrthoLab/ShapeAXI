@@ -203,6 +203,7 @@ def CreatePlane(Origin,Point1,Point2,Resolution):
     plane.Update()
     return plane.GetOutput()
 
+
 def ReadSurf(fileName):
 
     fname, extension = os.path.splitext(fileName)
@@ -261,6 +262,7 @@ def ReadSurf(fileName):
             reader.Update()
             surf = reader.GetOutput()
     elif extension == '.gii':
+
         import nibabel as nib
         from fsl.data import gifti
 
@@ -285,7 +287,9 @@ def ReadSurf(fileName):
         surf = vtk.vtkPolyData()
         surf.SetPoints(points)
         surf.SetPolys(cells)
-
+    else:
+        raise Exception("File format not supported")
+    
     return surf
 
 def WriteSurf(surf, fileName, use_binary=False):

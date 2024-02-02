@@ -22,9 +22,9 @@ import pickle
 import plotly.graph_objects as go
 import plotly.express as px
 
-from . import utils
-from .saxi_train import SaxiIcoClassification_train
-from .colors import bcolors
+import utils
+from saxi_train import SaxiIcoClassification_train
+from colors import bcolors
 
 # This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
