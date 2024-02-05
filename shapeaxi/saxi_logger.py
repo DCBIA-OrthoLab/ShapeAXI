@@ -84,7 +84,6 @@ class SaxiImageLoggerNeptune_Ico_fs(Callback):
             VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
 
             batch_size = 3
-            print("coucou")
             num_images = min(batch_size, self.num_images)
 
             VL = VL.to(pl_module.device,non_blocking=True)
@@ -99,7 +98,6 @@ class SaxiImageLoggerNeptune_Ico_fs(Callback):
             with torch.no_grad():
                 # Render the input surface mesh to an image
                 X, PF = pl_module.render(VL[0:1], FL[0:1], VFL[0:1], FFL[0:1])
-                print(X.shape)
 
                 grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 0:3, :, :])#Grab the first image, RGB channels only, X, Y. The time dimension is on dim=1
                 fig = plt.figure(figsize=(7, 9))
