@@ -35,23 +35,13 @@ pip install shapeaxi
 
 ### Installation of pytorch3d 
 
-For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
-First, you can run **ipython** in the terminal (or **python -m IPython** if it is not working).  
-You can now add paste these lines :
+For this installation, we are going to use a variable, **{YOURVERSION}**, because this installation is specific to each computer configuration.
+First, you can run this line to print the content of the variable **{YOURVERSION}** that we will use :
 ```bash
-import sys
-import torch
-pyt_version_str=torch.__version__.split("+")[0].replace(".", "")
-version_str="".join([
-    f"py3{sys.version_info.minor}_cu",
-    torch.version.cuda.replace(".",""),
-    f"_pyt{pyt_version_str}"
-])
-print(version_str)
+python -c "import sys; import torch; pyt_version_str=torch.__version__.split('+')[0].replace('.', ''); version_str=''.join([f'py3{sys.version_info.minor}_cu', torch.version.cuda.replace('.', ''), f'_pyt{pyt_version_str}']); print(version_str)"
 ```
 It will print something like this : **py39_cu117_pyt201**.  
-This is the content of your variable {YOURVERSION}.
-- Finally, exit of ipython and in your terminal you can run this line by adding your editing {YOURVERSION}, 
+- Finally, you can run this line by adding your editing **{YOURVERSION}**, 
 ```bash
 pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{YOURVERSION}/download.html
 ```
