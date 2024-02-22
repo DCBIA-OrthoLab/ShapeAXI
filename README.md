@@ -177,8 +177,8 @@ Output:
 
 The first step of the code is to compute a global scale factor for all shapes in the population.  
 If you want to do this, add ```--compute_scale_factor 1```.  
-Moreover, if you already has a column with scale_factor in your csv file, specify it with ```--column_scale_factor name_of_your_column```.
-Otherwise, if you do not want to compute a global scale factor, do not specify anything and it will skip thie part.  
+Moreover, if you already has a column with **scale_factor** in your csv file, specify it with ```--column_scale_factor name_of_your_column```.
+Otherwise, if you do not want to compute a global scale factor, do not specify anything and it will skip this part.  
 
 
 ### 2. Split
@@ -203,7 +203,7 @@ Here, an example of the content of you csv files :
 ### 3. Training 
 
 For this step, there are one training, validation and testing dataset for each fold. You can choose for the training : batch size, maximum number of epochs, model you want.  
-If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold 
+If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold.
 
 ### 4. Test, evaluation, aggregate and explainability
 
