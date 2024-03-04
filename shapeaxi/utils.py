@@ -498,8 +498,8 @@ def GetRotationMatrixT(rotationAngle, rotationVector):
     return rotation_matrix
 
 def GetUnitSurf(surf, mean_arr = None, scale_factor = None, copy=True):
-  unit_surf, surf_mean, surf_scale = ScaleSurf(surf, mean_arr, scale_factor, copy)
-  return unit_surf
+    unit_surf, surf_mean, surf_scale = ScaleSurf(surf, mean_arr, scale_factor, copy)
+    return unit_surf
 
 def GetUnitSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
     unit_surf, surf_mean, surf_scale = ScaleSurfT(surf, mean_arr, scale_factor, copy)
@@ -529,12 +529,10 @@ def GetColoredActor(surf, property_name, range_scalars = None):
 
     return actor
 
-
 def GetRandomColoredActor(surf, property_name, range_scalars = [0, 1000]):
     if range_scalars == None:
         range_scalars = surf.GetPointData().GetScalars(property_name).GetRange()
 
-    
     ctf = vtk.vtkColorTransferFunction()        
     ctf.SetColorSpaceToRGB()
 
@@ -582,7 +580,6 @@ def GetSeparateColoredActor(surf, property_name, range_scalars = [0, 60]):
     if range_scalars == None:
         range_scalars = surf.GetPointData().GetScalars(property_name).GetRange()
 
-    
     ctf = vtk.vtkColorTransferFunction()        
     ctf.SetColorSpaceToRGB()
 
@@ -995,23 +992,42 @@ def PolyDataToTensors(surf, device='cpu'):
 
     verts, faces, edges = PolyDataToNumpy(surf)
     
-    verts = ToTensor(dtype=torch.float32, device=device)(verts)
-    faces = ToTensor(dtype=torch.int64, device=device)(faces)
-    edges = ToTensor(dtype=torch.int32, device=device)(edges)
+    verts = torch.tensor(verts).to(torch.float32)
+    faces = torch.tensor(faces).to(torch.int64)
+    edges = torch.tensor(edges).to(torch.int64)
     
     return verts, faces, edges
 
 def PolyDataToNumpy(surf):
 
+    vtk.vtkObject.GlobalWarningDisplayOff()
+    
     edges_filter = vtk.vtkExtractEdges()
     edges_filter.SetInputData(surf)
     edges_filter.Update()
-
+    
     verts = vtk_to_numpy(surf.GetPoints().GetData())
     faces = vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]
     edges = vtk_to_numpy(edges_filter.GetOutput().GetLines().GetData()).reshape(-1, 3)[:,1:]
     
     return verts, faces, edges
+
+def PolyDataToTensors_v_f(surf, device='cpu'):
+
+    verts, faces, = PolyDataToNumpy_v_f(surf)
+    
+    verts = torch.tensor(verts)
+    faces = torch.tensor(faces)
+    
+    return verts, faces
+
+def PolyDataToNumpy_v_f(surf):
+
+    vtk.vtkObject.GlobalWarningDisplayOff()
+    verts = vtk_to_numpy(surf.GetPoints().GetData())
+    faces = vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]
+    
+    return verts, faces
 
 def UnitVerts(verts):
     min_verts, _ = torch.min(verts, axis=0)

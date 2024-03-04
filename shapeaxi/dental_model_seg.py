@@ -10,11 +10,11 @@ from tqdm import tqdm
 import vtk
 import numpy as np
 
-import saxi_nets, utils
-from colors import bcolors
-from post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
-from saxi_dataset import SaxiDataset
-from saxi_transforms import UnitSurfTransform
+from . import saxi_nets, utils
+from .colors import bcolors
+from .post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
+from .saxi_dataset import SaxiDataset
+from .saxi_transforms import UnitSurfTransform
 
 
 def main(args):

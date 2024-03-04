@@ -7,7 +7,6 @@ from torch import nn
 from torchvision.models import resnet50
 import monai
 import pandas as pd
-from transformation import RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 import numpy as np
 import random
 import torch
@@ -23,9 +22,10 @@ from tqdm import tqdm
 from sklearn.utils import class_weight
 
 
-from utils import ReadSurf, PolyDataToTensors
-from saxi_nets import IcoConv
-from saxi_dataset import BrainIBISDataModule
+from .utils import ReadSurf, PolyDataToTensors
+from .saxi_nets import SaxiIcoClassification
+from .saxi_dataset import SaxiIcoDataModule
+from .saxi_transforms import RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 
 def get_epoch(name_model):
     epoch = ''
@@ -110,7 +110,7 @@ list_nb_verts_ico = [12,42]
 nb_images = list_nb_verts_ico[ico_lvl-1]
 
 ###Dataset
-brain_data = BrainIBISDataModule(batch_size,list_demographic,path_data,data_train,data_val,data_test,list_path_ico,train_transform = train_transform,val_and_test_transform =val_and_test_transform,num_workers=num_workers)#MLR
+brain_data = SaxiIcoDataModule(batch_size,list_demographic,path_data,data_train,data_val,data_test,list_path_ico,train_transform = train_transform,val_and_test_transform =val_and_test_transform,num_workers=num_workers)#MLR
 nbr_features = brain_data.get_features()
 weights = brain_data.get_weigths()
 nbr_demographic = brain_data.get_nbr_demographic()
@@ -119,7 +119,7 @@ nbr_demographic = brain_data.get_nbr_demographic()
 
 
 path_model = '../Checkpoint/'+experiment+'/'+epoch
-model = IcoConv(Layer,pretrained,nbr_features,nbr_demographic,dropout_lvl,image_size,noise_lvl,ico_lvl,batch_size,weights,radius=radius,lr=lr)
+model = SaxiIcoClassification(Layer,pretrained,nbr_features,nbr_demographic,dropout_lvl,image_size,noise_lvl,ico_lvl,batch_size,weights,radius=radius,lr=lr)
 checkpoint = torch.load(path_model)
 dict_state_dict = dict(checkpoint['state_dict'].items())
 if 'loss_train.weight' in dict_state_dict.keys():

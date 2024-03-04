@@ -14,36 +14,29 @@ from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger
 import monai
 import nibabel as nib
 from sklearn.utils import class_weight
-from pl_bolts.models.self_supervised import Moco_v2
+torch.set_float32_matmul_precision('high')
 
 
-from saxi_dataset import SaxiDataModule, SaxiDataset, BrainIBISDataModule, BrainDataModule_fs
-from saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-import saxi_nets
-from saxi_nets import MonaiUNet, SaxiIcoClassification
-from saxi_logger import SaxiImageLogger, TeethNetImageLogger, ImageLogger, SaxiImageLoggerNeptune, SaxiImageLoggerNeptune_Ico_fs
+from .saxi_dataset import SaxiDataModule, SaxiDataset, SaxiIcoDataModule_fs, SaxiIcoDataModule, SaxiIcoDataset_fs
+from .saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
+from . import saxi_nets
+from .saxi_nets import MonaiUNet, SaxiIcoClassification
+from .saxi_logger import SaxiImageLoggerTensorboard, SaxiImageLoggerTensorboardSegmentation, SaxiImageLoggerTensorboardIco, SaxiImageLoggerTensorboardIco_fs, SaxiImageLoggerNeptune, SaxiImageLoggerNeptune_Ico_fs
 
-
-# Training machine learning models
-def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback):
-    #Initialize the dataset and corresponding data loader for training and validation
-    saxi_args = vars(args)
-
-    saxi_data = SaxiDataModule(df_train, df_val, df_test,
-                        mount_point = mount_point,
-                        batch_size = args.batch_size,
-                        num_workers = args.num_workers,
-                        model = args.nn,
-                        surf_column = args.surf_column,
-                        class_column = args.class_column,
-                        train_transform = TrainTransform(scale_factor=args.scale_factor),
-                        valid_transform = EvalTransform(scale_factor=args.scale_factor),
-                        test_transform = EvalTransform(scale_factor=args.scale_factor))
-    
+def logger_neptune_tensorboard(args):
+    image_logger = None
     logger = None
+
     if args.tb_dir:
         logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
-        callbacks.append(SaxiImageLogger())
+        if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
+            image_logger = SaxiImageLoggerTensorboard()
+        elif args.nn == "SaxiSegmentation":
+            image_logger = SaxiImageLoggerTensorboardSegmentation()
+        elif args.nn == "SaxiIcoClassification":
+            image_logger = SaxiImageLoggerTensorboardIco()
+        else:
+            image_logger = SaxiImageLoggerTensorboardIco_fs()
 
     elif args.neptune_project:
         logger = NeptuneLogger(
@@ -51,9 +44,20 @@ def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_poi
             tags=args.neptune_tags,
             api_key=os.environ['NEPTUNE_API_TOKEN']
         )
-        image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
+        if args.nn == "SaxiClassification" or args.nn == "SaxiRegression" or args.nn == "SaxiIcoClassification" or args.nn == "SaxiSegmentation":
+            image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
+        else:
+            image_logger = SaxiImageLoggerNeptune_Ico_fs(num_images=args.num_images)
+
+    return logger, image_logger
 
 
+def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback):
+
+    #Creation of Dataset
+    brain_data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,model = args.nn,surf_column = args.surf_column,class_column = args.class_column,train_transform = TrainTransform(scale_factor=args.scale_factor),valid_transform = EvalTransform(scale_factor=args.scale_factor),test_transform = EvalTransform(scale_factor=args.scale_factor))
+
+    saxi_args = vars(args)
     if args.nn == "SaxiClassification":
         unique_classes = np.sort(np.unique(df_train[args.class_column]))
         unique_class_weights = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
@@ -67,53 +71,41 @@ def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_poi
     SAXINETS = getattr(saxi_nets, args.nn)
     model = SAXINETS(**saxi_args)
 
-    callbacks = [early_stop_callback, checkpoint_callback, image_logger]
-    trainer = Trainer(logger=logger,max_epochs=args.epochs,log_every_n_steps=args.log_every_n_steps,callbacks=callbacks,devices=torch.cuda.device_count(), accelerator="gpu", strategy=DDPStrategy(find_unused_parameters=False),num_sanity_val_steps=0,profiler=args.profiler)
-    trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
+    callbacks = [early_stop_callback, checkpoint_callback]
+    logger, image_logger = logger_neptune_tensorboard(args)
 
+    if image_logger:
+        callbacks.append(image_logger)
+
+    trainer = Trainer(logger=logger,max_epochs=args.epochs,log_every_n_steps=args.log_every_n_steps,callbacks=callbacks,devices=torch.cuda.device_count(), accelerator="gpu", strategy=DDPStrategy(find_unused_parameters=False),num_sanity_val_steps=0,profiler=args.profiler)
+    trainer.fit(model, datamodule=brain_data, ckpt_path=args.model)
 
 
 def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, logger, early_stop_callback):
-     # The dataset and corresponding data loader are initialized for training and validation
-    class_weights = None
 
-    saxi_data = SaxiDataModule(df_train, df_val, df_test,
-                        mount_point = mount_point,
-                        batch_size = args.batch_size,
-                        num_workers = args.num_workers,
-                        model = args.nn,
-                        surf_column = 'surf',
-                        surf_property = 'UniversalID',
-                        #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
-                        train_transform = UnitSurfTransform(),
-                        valid_transform = UnitSurfTransform(),
-                        test_transform = UnitSurfTransform())
+    #Creation of Dataset
+    brain_data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,model = args.nn,surf_column = 'surf',surf_property = 'UniversalID',train_transform = UnitSurfTransform(),valid_transform = UnitSurfTransform(),test_transform = UnitSurfTransform())
+    #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
 
-    logger = None
-    image_logger = TeethNetImageLogger()
+    # model = MonaiUNet(args, out_channels = 34, class_weights=None, image_size=320, train_sphere_samples=args.train_sphere_samples)
 
-    if args.tb_dir:
-        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
-        callbacks.append(SaxiImageLogger())
 
-    elif args.neptune_project:
-        logger = NeptuneLogger(
-            project=args.neptune_project,
-            tags=args.neptune_tags,
-            api_key=os.environ['NEPTUNE_API_TOKEN']
-        )
-        image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
+    # CHECK THISSSSS :
 
-    callbacks = [early_stop_callback, checkpoint_callback, image_logger]
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS(**saxi_args)
 
-    model = MonaiUNet(args, out_channels = 34, class_weights=class_weights, image_size=320, train_sphere_samples=args.train_sphere_samples)
+    callbacks = [early_stop_callback, checkpoint_callback]
+    logger, image_logger = logger_neptune_tensorboard(args)
+
+    if image_logger:
+        callbacks.append(image_logger)
 
     trainer = Trainer(logger=logger,max_epochs=args.epochs,log_every_n_steps=args.log_every_n_steps,callbacks=callbacks,devices=torch.cuda.device_count(), accelerator="gpu", strategy=DDPStrategy(find_unused_parameters=False, process_group_backend="nccl"),num_sanity_val_steps=0,profiler=args.profiler)
-    trainer.fit(model, datamodule=saxi_data, ckpt_path=args.model)
+    trainer.fit(model, datamodule=brain_data, ckpt_path=args.model)
 
 
-
-def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, val, test, logger, early_stop_callback):
+def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
 
     list_path_ico = [args.path_ico_left,args.path_ico_right]
 
@@ -139,10 +131,15 @@ def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, v
     nb_images = list_nb_verts_ico[args.ico_lvl-1]
     
     #Creation of Dataset
-    brain_data = BrainIBISDataModule(args.batch_size,list_demographic,train,val,test,list_path_ico,train_transform = train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column)#MLR
-
+    brain_data = SaxiIcoDataModule(args.batch_size,list_demographic,train,val,test,list_path_ico,train_transform = train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column)#MLR
     weights = brain_data.get_weigths()
     nbr_demographic = brain_data.get_nbr_demographic()
+
+    df_train = pd.read_csv(train)
+    unique_classes = np.sort(np.unique(df_train[args.class_column]))
+    unique_class_weights = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
+
+    print('Number of classes:',len(unique_class_weights))
 
     if args.ico_lvl == 1:
         args.radius = 1.76 
@@ -152,37 +149,24 @@ def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, v
     saxi_args = vars(args)
     saxi_args['nbr_demographic'] = nbr_demographic
     saxi_args['weights'] = weights
-    saxi_args['out_classes'] = 216
+    saxi_args['out_classes'] = 2
+    saxi_args['out_size'] = 256
 
     #Creation of our model
     SAXINETS = getattr(saxi_nets, args.nn)
     model = SAXINETS(**saxi_args)
 
-    #Image Logger (Useful if we use Tensorboard)
-    logger = None
-    image_logger = ImageLogger(num_features = brain_data.get_features(),num_images = nb_images,mean = 0,std=args.noise_lvl)
+    callbacks = [early_stop_callback, checkpoint_callback]
+    logger, image_logger = logger_neptune_tensorboard(args)
 
-    if args.tb_dir:
-        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
-        callbacks.append(SaxiImageLogger())
-
-    elif args.neptune_project:
-        logger = NeptuneLogger(
-            project=args.neptune_project,
-            tags=args.neptune_tags,
-            api_key=os.environ['NEPTUNE_API_TOKEN']
-        )
-        image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
-
-    callbacks = [early_stop_callback,checkpoint_callback,image_logger]
-
+    if image_logger:
+        callbacks.append(image_logger)
     #Trainer
     trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu") #,accelerator="gpu"
     trainer.fit(model,datamodule=brain_data)
 
 
-
-def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train, val, test, logger, early_stop_callback):
+def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
     #Transformation
     list_train_transform = [] 
     list_train_transform.append(CenterTransform())
@@ -197,44 +181,51 @@ def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train
     list_val_and_test_transform.append(NormalizePointTransform())
     val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
 
-    #Get number of images
-    list_nb_verts_ico = [12, 42, 162, 642, 2562, 10242, 40962, 163842]
-    nb_images = list_nb_verts_ico[args.ico_lvl-1]
+    # df_train = pd.read_csv("/work/floda/source/qc_filtered.csv")
+    # brain_data = SaxiIcoDataset_fs(df_train,transform=train_transform,name_class = args.class_column,freesurfer_path=args.fs_path)
+
+    # for i in range(len(brain_data)):
+    #     try:
+    #         sample = brain_data[i]
+    #         print(i)
+    #     except Exception as e:
+    #         print(f"Path or CSV input line: {brain_data.df.iloc[i]}")
+    
+    # df_train = "/work/floda/source/qc_filtered.csv"
+    # brain_data = SaxiIcoDataModule_fs(args.batch_size,df_train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
+
+    # for i, batch in enumerate(brain_data.train_dataloader()):
+    #     try:
+    #         print(f"Processing batch {i+2}")
+    #     except RuntimeError as e:
+    #         print(f"RuntimeError encountered at batch {i+1}: {e}")
+    #         break
+
     
     #Creation of Dataset
-    brain_data = BrainDataModule_fs(args.batch_size,train,val,test,train_transform = train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)#MLR
+    brain_data = SaxiIcoDataModule_fs(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
+    df_train = pd.read_csv(train)
+    unique_classes = np.sort(np.unique(df_train[args.class_column]))
+    nb_classes = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
 
-    if args.ico_lvl == 1:
-        args.radius = 1.76 
-    elif args.ico_lvl == 2:
-        args.radius = 1
+    print('Number of classes:',len(nb_classes))
 
     saxi_args = vars(args)
-    saxi_args['out_classes'] = 2
+    saxi_args['out_classes'] = len(nb_classes)
+    saxi_args['out_size'] = 256
 
     #Creation of our model
     SAXINETS = getattr(saxi_nets, args.nn)
     model = SAXINETS(**saxi_args)
 
-    #Image Logger (Useful if we use Tensorboard)
-    logger = None
-    image_logger = ImageLogger(num_features = brain_data.get_features(),num_images = nb_images,mean = 0,std=args.noise_lvl)
-    if args.tb_dir:
-        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)
-        callbacks.append(SaxiImageLogger())
+    callbacks = [early_stop_callback, checkpoint_callback]
+    logger, image_logger = logger_neptune_tensorboard(args)
 
-    elif args.neptune_project:
-        logger = NeptuneLogger(
-            project=args.neptune_project,
-            tags=args.neptune_tags,
-            api_key=os.environ['NEPTUNE_API_TOKEN']
-        )
-        image_logger = SaxiImageLoggerNeptune_Ico_fs(num_images=args.num_images)
+    if image_logger:
+        callbacks.append(image_logger)
 
-    callbacks = [early_stop_callback,checkpoint_callback,image_logger]
-
-    #Trainer
-    trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu") #,accelerator="gpu"
+    # trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu")
+    trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
     trainer.fit(model,datamodule=brain_data)
 
 
@@ -257,13 +248,6 @@ def main(args):
     df_train = pd.read_csv(path_train)
     df_val = pd.read_csv(path_val)
     df_test = pd.read_csv(path_test)
-
-
-    #Create the logger for the training
-    if args.tb_dir:
-        logger = TensorBoardLogger(save_dir=args.tb_dir, name=args.tb_name)    
-    else:
-        logger = TensorBoardLogger(save_dir=mount_point, name=args.tb_name)  
     
     #Early Stopping
     early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
@@ -273,18 +257,16 @@ def main(args):
         SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback)
 
     elif args.nn == "SaxiSegmentation":
-        SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, logger, early_stop_callback)
+        SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback)
     
     elif args.nn == "SaxiIcoClassification":
-        SaxiIcoClassification_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, logger, early_stop_callback)
+        SaxiIcoClassification_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
 
     elif args.nn == "SaxiIcoClassification_fs":
-        SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, logger, early_stop_callback)
+        SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
 
-    
     else:
         raise ValueError ("Unknown neural network name: {}, choose between SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification".format(args.nn))
-
 
 
 

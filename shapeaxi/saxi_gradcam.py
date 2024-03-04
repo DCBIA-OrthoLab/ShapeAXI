@@ -19,10 +19,9 @@ from monai.transforms import (
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
-import saxi_nets, post_process as psp
-from saxi_dataset import SaxiDataset, BrainIBISDataset
-from saxi_transforms import TrainTransform, EvalTransform, UnitSurfTransform, RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-
+from . import saxi_nets, post_process as psp
+from .saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiIcoDataset_fs
+from .saxi_transforms import TrainTransform, EvalTransform, UnitSurfTransform, RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 
 # Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done.
 # Especially identify the parts of the picture which is the most important for the network to make a decision.
@@ -30,14 +29,6 @@ from saxi_transforms import TrainTransform, EvalTransform, UnitSurfTransform, Ra
 
 ## Gradcam function for Regression and Classification model
 def SaxiClassification_Regression_gradcam(args):
-    fname = os.path.basename(args.csv_test)    
-    ext = os.path.splitext(fname)[1]
-
-    # Read of the test data from a CSV or Parquet file
-    if ext == ".csv":
-        df_test = pd.read_csv(args.csv_test)
-    else:
-        df_test = pd.read_parquet(args.csv_test)
     
     SAXINETS = getattr(saxi_nets, args.nn)
     model = SAXINETS.load_from_checkpoint(args.model)
@@ -146,7 +137,12 @@ def SaxiClassification_Regression_gradcam(args):
         out.release()
 
 
-#################################################################################### ICOCONV PART ##############################################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                         IcoConv                                                                                   #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
 
 class Classification_for_left_path(nn.Module):
     def __init__(self,classification_layer,xR,demographic):
@@ -160,6 +156,7 @@ class Classification_for_left_path(nn.Module):
         x = torch.cat(l,dim=1)
         x = self.classification_layer(x)
         return x
+
 
 class Classification_for_right_path(nn.Module):
     def __init__(self,classification_layer,xL,demographic):
@@ -175,65 +172,19 @@ class Classification_for_right_path(nn.Module):
         return x 
 
 
-def SaxiIcoClassification_gradcam(args):     
-
-    fname = os.path.basename(args.csv_test)    
-    ext = os.path.splitext(fname)[1]
-
-    # Read of the test data from a CSV or Parquet file
-    if ext == ".csv":
-        df_test = pd.read_csv(args.csv_test)
-    else:
-        df_test = pd.read_parquet(args.csv_test) 
-    
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS.load_from_checkpoint(args.model)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    model.eval()
+def SaxiIcoClassification_gradcam(args, df_test, model):     
     
     list_demographic = ['Gender','MRI_Age','AmygdalaLeft','HippocampusLeft','LatVentsLeft','ICV','Crbm_totTissLeft','Cblm_totTissLeft','AmygdalaRight','HippocampusRight','LatVentsRight','Crbm_totTissRight','Cblm_totTissRight'] #MLR
     list_path_ico = [args.path_ico_left,args.path_ico_right]
 
-    test_ds = BrainIBISDataset(df_test,list_demographic,list_path_ico,transform=UnitSurfTransform())
+    test_ds = SaxiIcoDataset(df_test,list_demographic,list_path_ico,transform=UnitSurfTransform())
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
     hemisphere = 'left'#'left','right'
 
-    ico_lvl = 2
-    if ico_lvl == 1:
-        radius = 1.76 
-    elif ico_lvl == 2:
-        radius = 1
-
-    list_path_ico = [args.path_ico_left,args.path_ico_right]
-
-    ###Demographics
-    list_demographic = ['Gender','MRI_Age','AmygdalaLeft','HippocampusLeft','LatVentsLeft','ICV','Crbm_totTissLeft','Cblm_totTissLeft','AmygdalaRight','HippocampusRight','LatVentsRight','Crbm_totTissRight','Cblm_totTissRight']#MLR
-    #List of used demographics 
-
-    ###Transformation
-    list_train_transform = []    
-    list_train_transform.append(CenterTransform())
-    list_train_transform.append(NormalizePointTransform())
-    list_train_transform.append(RandomRotationTransform())
-    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std))
-    list_train_transform.append(NormalizePointTransform())
-    train_transform = monai.transforms.Compose(list_train_transform)
-
-    list_val_and_test_transform = []    
-    list_val_and_test_transform.append(CenterTransform())
-    list_val_and_test_transform.append(NormalizePointTransform())
-    val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
-
-
-    list_nb_verts_ico = [12,42]
-    nb_images = list_nb_verts_ico[ico_lvl-1]
-
-
     targets = None
-    if not args.target_class is None:
-        targets = [ClassifierOutputTarget(args.target_class)]
+    # if not args.target_class is None:
+    #     targets = [ClassifierOutputTarget(args.target_class)]
 
     for idx, batch in tqdm(enumerate(test_loader), total=len(test_loader)):
 
@@ -274,13 +225,111 @@ def SaxiIcoClassification_gradcam(args):
     torch.save(grayscale_cam, args.out+"/"+name_save)
 
 
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                    IcoConv Freesurfer                                                                             #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
+
+class Classification_for_path_fs(nn.Module):
+    def __init__(self, classification_layer, x_other):
+        super().__init__()
+        self.classification_layer = classification_layer
+        self.x_other = x_other
+
+    def forward(self, x):
+        l = [x, self.x_other]
+        x = torch.cat(l, dim=1)
+        x = self.classification_layer(x)
+        return x
+
+
+def SaxiIcoClassification_fs_gradcam(args, df_test, model):     
+
+    test_ds = SaxiIcoDataset_fs(df_test,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
+    test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
+
+    target_layers = []
+    hemisphere = 'left'#'left','right'
+
+    # for hemisphere in ['left', 'right']:
+
+    targets = None
+    if not args.target_class is None:
+        targets = [ClassifierOutputTarget(args.target_class)]
+
+    for idx, batch in tqdm(enumerate(test_loader), total=len(test_loader)):
+
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch 
+        VL = VL.cuda(non_blocking=True)
+        FL = FL.cuda(non_blocking=True)
+        VFL = VFL.cuda(non_blocking=True)
+        FFL = FFL.cuda(non_blocking=True)
+        VR = VR.cuda(non_blocking=True)
+        FR = FR.cuda(non_blocking=True)
+        VFR = VFR.cuda(non_blocking=True)
+        FFR = FFR.cuda(non_blocking=True)
+        FFL = FFL.squeeze(0)
+        FFR = FFR.squeeze(0)
+
+        if hemisphere == 'left':
+            x, PF = model.render(VL,FL,VFL,FFL)
+        else:
+            x, PF = model.render(VR,FR,VFR,FFR)
+        
+        del VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y
+        torch.cuda.empty_cache() 
+
+        classification_layer = model.Classification
+        if hemisphere == 'left':
+            input_tensor_cam = x
+            x_other = model.poolingR(model.IcosahedronConv2dR(model.TimeDistributedR(x))) 
+        else:
+            input_tensor_cam = x
+            x_other = model.poolingL(model.IcosahedronConv2dL(model.TimeDistributedL(x))) 
+
+        classifier = Classification_for_path_fs(classification_layer, x_other)
+        model_cam = nn.Sequential(model.TimeDistributedL if hemisphere == 'left' else model.TimeDistributedR,
+                                    model.IcosahedronConv2dL if hemisphere == 'left' else model.IcosahedronConv2dR,
+                                    model.poolingL if hemisphere == 'left' else model.poolingR,
+                                    classifier)
+
+        target_layers.append(model_cam[0].module.layer4[-1])  # Append target layer for GradCAM
+        cam = GradCAM(model=model_cam, target_layers=target_layers)
+
+
+    grayscale_cam = torch.Tensor(cam(input_tensor=input_tensor_cam, targets=targets))
+
+    name_save = f'grad_cam_{hemisphere}.pt'
+    torch.save(grayscale_cam, args.out+"/"+name_save)
+    print('Gradcam saved in',args.out+"/"+name_save)
+
+
 
 
 def main(args):
+    fname = os.path.basename(args.csv_test)    
+    ext = os.path.splitext(fname)[1]
+
+    if ext == ".csv":
+        df_test = pd.read_csv(args.csv_test)
+    else:
+        df_test = pd.read_parquet(args.csv_test)
+
     if args.nn == 'SaxiClassification' or args.nn == 'SaxiRegression':
-        SaxiClassification_Regression_gradcam(args)
-    elif args.nn == 'SaxiIcoClassification':
-        SaxiIcoClassification_gradcam(args) 
+        SaxiClassification_Regression_gradcam(args, df_test)
+
+    elif args.nn == 'SaxiIcoClassification' or args.nn == 'SaxiIcoClassification_fs':
+        SAXINETS = getattr(saxi_nets, args.nn)
+        model = SAXINETS.load_from_checkpoint(args.model)
+        device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+        model.to(device)
+        model.eval()
+        if args.nn == 'SaxiIcoClassification':
+            SaxiIcoClassification_gradcam(args, df_test, model) 
+        else:
+            SaxiIcoClassification_fs_gradcam(args, df_test, model)
 
 
 
@@ -300,6 +349,8 @@ def get_argparse():
     input_group.add_argument('--path_ico_left', type=str, help='Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk')
     input_group.add_argument('--path_ico_right', type=str, help='Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk')
     input_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')
+    input_group.add_argument('--device', type=str, help='Device (default: cuda:0)', default='cuda:0')
+    input_group.add_argument('--fs_path', type=str, help='Path to FreeSurfer directory', default='None')
 
     ##Hyperparameters
     hyper_group = parser.add_argument_group('Hyperparameters')

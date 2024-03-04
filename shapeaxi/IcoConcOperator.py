@@ -10,7 +10,8 @@ class IcosahedronConv2d(nn.Module):
         self.module = module
         self.verts = verts
         self.list_edges = list_edges
-        self.nbr_vert = np.max(self.list_edges)+1
+        # self.nbr_vert = np.max(self.list_edges)+1
+        self.nbr_vert = len(self.verts)
 
         self.list_neighbors = self.get_neighbors()
         self.list_neighbors = self.sort_neighbors()
@@ -23,8 +24,8 @@ class IcosahedronConv2d(nn.Module):
     def get_neighbors(self):
         neighbors = [[] for i in range(self.nbr_vert)]
         for edge in self.list_edges:
-            v1 = edge[0]
-            v2 = edge[1]
+            v1 = edge[0].item()
+            v2 = edge[1].item()
             neighbors[v1].append(v2)
             neighbors[v2].append(v1)
         return neighbors

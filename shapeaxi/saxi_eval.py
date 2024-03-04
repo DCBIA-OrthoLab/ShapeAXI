@@ -22,9 +22,9 @@ import pickle
 import plotly.graph_objects as go
 import plotly.express as px
 
-import utils
-from saxi_train import SaxiIcoClassification_train
-from colors import bcolors
+from . import utils
+from .colors import bcolors
+from .saxi_train import SaxiIcoClassification_train
 
 # This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
@@ -76,6 +76,12 @@ def choose_score(args,report):
       sys.exit("The value of score is not F1 or AUC. You must specify F1 or AUC.")
 
 
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                        Classification, Ico and Ico_fs Classification                                                              #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
 
 def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
     # For the classification, evaluating a classification model, generating classification metrics, creating confusion matrix visualizations
@@ -84,14 +90,15 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
       class_names = df[[args.csv_tag_column, args.csv_prediction_column]].drop_duplicates()[args.csv_tag_column]
       class_names.sort()
     else:
-      class_names = pd.unique(df[args.csv_prediction_column])
+      class_names = pd.unique(df[args.class_column])
       class_names.sort()
+      print("Class names:", class_names)
 
     for idx, row in df.iterrows():
       y_true_arr.append(row[args.class_column])
       y_pred_arr.append(row[args.csv_prediction_column])
 
-    report = classification_report(y_true_arr, y_pred_arr, output_dict=True)
+    report = classification_report(y_true_arr, y_pred_arr, output_dict=True, zero_division=1)
     print(json.dumps(report, indent=2))
 
     cnf_matrix = confusion_matrix(y_true_arr, y_pred_arr)
@@ -138,7 +145,8 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
 
           fpr, tpr, _ = roc_curve(y_true, y_score)
           auc_score = roc_auc_score(y_true, y_score)
-          report[str(i)]["auc"] = auc_score
+          # report[str(i)]["auc"] = auc_score
+          report.get(str(i), {})["auc"] = auc_score
 
           name = f"{y_onehot.columns[i]} (AUC={auc_score:.2f})"
           fig.add_trace(go.Scatter(x=fpr, y=tpr, name=name, mode='lines'))
@@ -158,14 +166,22 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
       support = []
       auc = []
       for i in range(y_scores.shape[1]):
-          support.append(report[str(i)]["support"])
-          auc.append(report[str(i)]["auc"])
+          # support.append(report[str(i)]["support"])
+          support.append(report.get(str(i), {}).get("support", 0))
+          # auc.append(report[str(i)]["auc"])
+          auc.append(report.get(str(i), {}).get("auc", 0))
 
       support = np.array(support)
       auc = np.array(auc)
 
-      report["macro avg"]["auc"] = np.average(auc) 
-      report["weighted avg"]["auc"] = np.average(auc, weights=support) 
+      # report["macro avg"]["auc"] = np.average(auc) 
+      # report["weighted avg"]["auc"] = np.average(auc, weights=support) 
+      if np.sum(support) != 0:
+          report["weighted avg"]["auc"] = np.average(auc, weights=support)
+          report["weighted avg"]["auc"] = np.average(auc, weights=support) 
+      else:
+          report["weighted avg"]["auc"] = 0
+          report["weighted avg"]["auc"] = 0
           
       df_report = pd.DataFrame(report).transpose()
       report_filename = os.path.splitext(path_to_csv)[0] + "_classification_report.csv"
@@ -176,7 +192,11 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
       return score
 
 
-############################################################################### SEGMENTATION EVALUATION ###############################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                  Segmentation                                                                                     #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
@@ -280,7 +300,13 @@ def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
 
     return score
 
-############################################################################### REGRESSION EVALUATION ###############################################################################
+
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                   Regression                                                                                      #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
 
 def SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
    #Visualization of the distribution of absolute errors and prediction errors
@@ -311,7 +337,7 @@ def main(args):
     else:        
         df = pd.read_parquet(path_to_csv)
 
-    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification":
+    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs":
       score = SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
 
     elif args.nn == "SaxiSegmentation":
@@ -319,9 +345,6 @@ def main(args):
 
     elif args.nn == "SaxiRegression":
       score = SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
-    
-    elif args.nn == "SaxiIcoClassification":
-      SaxiIcoClasssification_eval()
 
     else:
       raise NotImplementedError(f"Neural network {args.nn} is not implemented")
@@ -338,7 +361,7 @@ def get_argparse():
   parser.add_argument('--class_column', type=str, help='Which column to do the stats on', default='class')
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification'])
+  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs'])
   parser.add_argument('--title', type=str, help='Title for the image', default='Confusion matrix')
   parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')

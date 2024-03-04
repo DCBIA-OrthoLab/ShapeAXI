@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import torch
+import subprocess
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence as pack_sequence, pad_packed_sequence as unpack_sequence
 import pytorch_lightning as pl
 from torchvision import transforms
@@ -16,10 +17,6 @@ import nibabel as nib
 from fsl.data import gifti
 from tqdm import tqdm
 from sklearn.utils import class_weight
-import nibabel as nib
-from pl_bolts.transforms.dataset_normalizations import (
-    imagenet_normalization
-)
 import platform
 system = platform.system()
 if system == 'Windows':
@@ -28,11 +25,15 @@ else:
   code_path = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[:-1])
 sys.path.append(code_path)
 
-import subprocess
 
-import utils, post_process
+from . import utils
 
-#File which manages the dataset for saxi
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                     Classification, Regression, Segmentation                                                                      #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
 
 class SaxiDataset(Dataset):
     #This class is designed to make it easier to work with 3D surface data stored in files
@@ -78,7 +79,6 @@ class SaxiDataset(Dataset):
         # surf_path = f'{self.mount_point}/{self.df.iloc[idx][self.surf_column]}'
         surf_path = os.path.join(self.mount_point, self.df.iloc[idx][self.surf_column])
         return utils.ReadSurf(surf_path)
-
 
 
 class SaxiDataModule(pl.LightningDataModule):
@@ -145,59 +145,14 @@ class SaxiDataModule(pl.LightningDataModule):
         return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
 
 
-
-class SaxiTimepointsDataset(Dataset):
-    # It is designed to handle time series data, where each time point represents 3D surface data.
-    # It provides methods for loading and preprocessing the data for individual time points, allowing for flexible configurations depending on the specific use case, such as handling different surface properties or class labels.
-    def __init__(self, df, mount_point = "./", transform=None, surf_column="surf", surf_property=None, class_column=None, scalar_column=None, **kwargs):
-        self.df = df
-        self.mount_point = mount_point
-        self.transform = transform
-        self.surf_column = surf_column
-        self.surf_property = surf_property
-        self.class_column = class_column
-
-    def __len__(self):
-        return len(self.df.index)
-
-    def __getitem__(self, idx):
-        # Get specific item function for the dataset
-        surf = self.getSurf(idx)
-
-        if self.transform:
-            surf = self.transform(surf)
-
-        surf = utils.ComputeNormals(surf)
-        color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
-        verts = utils.PolyDataToTensors(surf)[0]
-        faces = utils.PolyDataToTensors(surf)[1]
-
-        if self.surf_property:            
-
-            faces_pid0 = faces[:,0:1]
-            surf_point_data = surf.GetPointData().GetScalars(self.surf_property)
-            
-            surf_point_data = torch.tensor(vtk_to_numpy(surf_point_data)).to(torch.float32)            
-            surf_point_data_faces = torch.take(surf_point_data, faces_pid0)            
-
-            surf_point_data_faces[surf_point_data_faces==-1] = 33            
-
-            return verts, faces, surf_point_data_faces, color_normals
-
-        if self.class_column:
-            cl = torch.tensor(self.df.iloc[idx][self.class_column], dtype=torch.int64)
-            return verts, faces, color_normals, cl
-
-        return verts, faces, color_normals
-
-    def getSurf(self, idx):
-        # Load the 3D data surface
-        surf_path = f'{self.mount_point}/{self.df.iloc[idx][self.surf_column]}'
-        return utils.ReadSurf(surf_path)
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                   IcoConv                                                                                         #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
-
-class BrainIBISDataset(Dataset):
+class SaxiIcoDataset(Dataset):
     def __init__(self,df,list_demographic,list_path_ico,transform = None,version=None,column_subject_ID='Subject_ID',column_age='Age',name_class ='ASD_administered'):
         self.df = df
         self.list_demographic = list_demographic
@@ -227,26 +182,17 @@ class BrainIBISDataset(Dataset):
             
             # Load Data
             row = self.df.loc[idx]
-            path_left_eacsf = row['PathLeftEACSF']
-            path_right_eacsf = row['PathRightEACSF']
-            path_left_sa = row['PathLeftSa']
-            path_right_sa = row['PathRightSa']
-            path_left_thickness = row['PathLeftThickness']
-            path_right_thickness = row['PathRightThickness']
+            path_eacsf = row[f'Path{"Left" if hemisphere=="left" else "Right"}EACSF']
+            path_sa = row[f'Path{"Left" if hemisphere=="left" else "Right"}Sa']
+            path_thickness = row[f'Path{"Left" if hemisphere=="left" else "Right"}Thickness']
 
-            l_features = []
+            l_features = [
+                self.data_to_tensor(path_eacsf).unsqueeze(dim=1),
+                self.data_to_tensor(path_sa).unsqueeze(dim=1),
+                self.data_to_tensor(path_thickness).unsqueeze(dim=1)
+            ]
 
-            if hemisphere == 'left':
-                l_features.append(self.data_to_tensor(path_left_eacsf).unsqueeze(dim=1))
-                l_features.append(self.data_to_tensor(path_left_sa).unsqueeze(dim=1))
-                l_features.append(self.data_to_tensor(path_left_thickness).unsqueeze(dim=1))
-                reader = utils.ReadSurf(self.list_path_ico[0])
-            else:
-                l_features.append(self.data_to_tensor(path_right_eacsf).unsqueeze(dim=1))
-                l_features.append(self.data_to_tensor(path_right_sa).unsqueeze(dim=1))
-                l_features.append(self.data_to_tensor(path_right_thickness).unsqueeze(dim=1))
-                reader = utils.ReadSurf(self.list_path_ico[1])
-            
+            reader = utils.ReadSurf(self.list_path_ico[0 if hemisphere=="left" else 1])
 
             vertex_features = torch.cat(l_features,dim=1)
 
@@ -258,7 +204,7 @@ class BrainIBISDataset(Dataset):
             Y = torch.tensor([int(row[self.name_class])])
 
             #Sphere per hemisphere
-            verts, faces, edges = utils.PolyDataToTensors(reader)
+            verts, faces = utils.PolyDataToTensors_v_f(reader)
             nb_faces = len(faces)
 
             #Transformations
@@ -276,9 +222,8 @@ class BrainIBISDataset(Dataset):
             return verts, faces,vertex_features,face_features,demographic, Y
 
 
-
-class BrainIBISDataModule(pl.LightningDataModule):
-    def __init__(self,batch_size,list_demographic,data_train,data_val,data_test,list_path_ico,train_transform=None,val_and_test_transform=None, num_workers=6, pin_memory=False, persistent_workers=False,name_class='ASD_administered'):
+class SaxiIcoDataModule(pl.LightningDataModule):
+    def __init__(self,batch_size,list_demographic,data_train,data_val,data_test,list_path_ico,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='ASD_administered'):
         super().__init__()
         self.batch_size = batch_size 
         self.list_demographic = list_demographic
@@ -289,8 +234,6 @@ class BrainIBISDataModule(pl.LightningDataModule):
         self.train_transform = train_transform
         self.val_and_test_transform = val_and_test_transform
         self.num_workers = num_workers
-        self.pin_memory = pin_memory
-        self.persistent_workers = persistent_workers
         self.name_class = name_class
 
         ### weights computing
@@ -318,12 +261,11 @@ class BrainIBISDataModule(pl.LightningDataModule):
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = BrainIBISDataset(self.df_train,self.list_demographic,self.list_path_ico,self.train_transform,name_class = self.name_class)
-        self.val_dataset = BrainIBISDataset(self.df_val,self.list_demographic,self.list_path_ico,self.val_and_test_transform,name_class = self.name_class)
-        self.test_dataset = BrainIBISDataset(self.df_test,self.list_demographic,self.list_path_ico,self.val_and_test_transform,name_class = self.name_class)
+        self.train_dataset = SaxiIcoDataset(self.df_train,self.list_demographic,self.list_path_ico,self.train_transform,name_class = self.name_class)
+        self.val_dataset = SaxiIcoDataset(self.df_val,self.list_demographic,self.list_path_ico,self.val_and_test_transform,name_class = self.name_class)
+        self.test_dataset = SaxiIcoDataset(self.df_test,self.list_demographic,self.list_path_ico,self.val_and_test_transform,name_class = self.name_class)
 
         VL, FL, VFL, FFL,VR, FR, VFR, FFR, demographic, Y = self.train_dataset.__getitem__(0)
-        self.nbr_features = VFL.shape[1]
         self.nbr_demographic = demographic.shape[0]
 
     def repeat_subject(self,df,final_size):
@@ -335,16 +277,13 @@ class BrainIBISDataModule(pl.LightningDataModule):
         return new_df
     
     def train_dataloader(self):    
-        return DataLoader(self.train_dataset,batch_size=self.batch_size,shuffle=True, num_workers=self.num_workers, pin_memory=self.pin_memory, persistent_workers=self.persistent_workers, drop_last=True)
+        return DataLoader(self.train_dataset,batch_size=self.batch_size,shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=self.pin_memory, persistent_workers=self.persistent_workers, drop_last=True)        
+        return DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True)        
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=self.pin_memory, persistent_workers=self.persistent_workers, drop_last=True)
-
-    def get_features(self):
-        return self.nbr_features
+        return DataLoader(self.test_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True)
 
     def get_weigths(self):
         return self.weights
@@ -353,18 +292,18 @@ class BrainIBISDataModule(pl.LightningDataModule):
         return self.nbr_demographic
 
 
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                              IcoConv Freesurfer                                                                                   #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
-##################################################################################### FREESURFER DATASET ############################################################################################################
-
-
-class BrainDataset_fs(Dataset):
-    def __init__(self,df,transform = None,version=None,column_subject_ID='Subject_ID',column_age='Age',name_class ='ASD_administered',freesurfer_path=None):
+class SaxiIcoDataset_fs(Dataset):
+    def __init__(self,df,transform = None,version=None,name_class ='fsqc_qc',freesurfer_path=None):
         self.df = df
         self.transform = transform
         self.version = version
-        self.column_subject_ID = column_subject_ID
-        self.column_age = column_age
         self.name_class = name_class
         self.freesurfer_path = freesurfer_path
 
@@ -373,8 +312,8 @@ class BrainDataset_fs(Dataset):
 
     def __getitem__(self,idx):
         #Get item for each hemisphere (left and right)
-        vertsL, facesL, vertex_featuresL, face_featuresL,Y = self.getitem_per_hemisphere('left', idx)
-        vertsR, facesR, vertex_featuresR, face_featuresR,Y = self.getitem_per_hemisphere('right', idx)
+        vertsL, facesL, vertex_featuresL, face_featuresL,Y = self.getitem_per_hemisphere('L', idx)
+        vertsR, facesR, vertex_featuresR, face_featuresR,Y = self.getitem_per_hemisphere('R', idx)
         return  vertsL, facesL, vertex_featuresL, face_featuresL, vertsR, facesR, vertex_featuresR, face_featuresR, Y 
     
     def data_to_tensor(self,path):
@@ -383,7 +322,16 @@ class BrainDataset_fs(Dataset):
         data = torch.from_numpy(data).float()
         return data
     
-    def set_wm_as_textures(self,sphere,wm_path):
+    def convert_txt(self,path_data):
+        data = nib.freesurfer.read_morph_data(path_data)
+        data_txt = path_data + '.txt'
+        with open(data_txt, 'w') as file:
+            for features in data:
+                file.write(str(features) + '\n')
+
+        return data_txt
+
+    def set_wm_as_texture(self, sphere, wm_path):
         # Create the vtkPolyDataNormals filter
         normals_filter = vtk.vtkPolyDataNormals()
         normals_filter.SetInputData(sphere)
@@ -397,14 +345,15 @@ class BrainDataset_fs(Dataset):
         # Access the normals array
         normals_array = output_with_normals.GetPointData().GetNormals()
 
-        # If the array is empty, we set the normals of the sphere with the white matter
-        if normals_array.GetNumberOfTuples() == 0:
+        # Check if normals_array is None or empty
+        if normals_array is None:
+            print(wm_path)
+        elif normals_array.GetNumberOfTuples() == 0:
             wm_surf = utils.ReadSurf(wm_path)
             wm_normals = utils.ComputeNormals(wm_surf)
             sphere.GetPointData().SetScalars(wm_normals)
 
         return sphere
-
 
             
     # Get the verts, faces, vertex_features, face_features and Y from an hemisphere
@@ -414,7 +363,8 @@ class BrainDataset_fs(Dataset):
         sub_session = '_ses-' + row['eventname'].replace('_', '').replace('year', 'Year').replace('arm', 'Arm').replace('followup', 'FollowUp').replace('yArm','YArm')
         path_to_fs_data = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf')
 
-        hemisphere_prefix = 'lh' if hemisphere == 'left' else 'rh'
+        # Load Data
+        hemisphere_prefix = 'lh' if hemisphere == 'L' else 'rh'
         path_sa = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.area')
         path_thickness = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.thickness')
         path_curvature = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.curv')
@@ -428,43 +378,42 @@ class BrainDataset_fs(Dataset):
         ]
 
         # Convert sphere and white matter to vtk
-        sphere_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere')
+        sphere_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg')
         sphere_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg.vtk')
         wm_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white')
         wm_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white.vtk')
 
         if not os.path.exists(sphere_vtk_path):
-            mri_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
-            subprocess.run(mri_command, shell=True)
+            mris_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
+            subprocess.run(mris_command, shell=True)
         if not os.path.exists(wm_vtk_path):
-            mri_command = f'mris_convert {wm_path} {wm_vtk_path}'
-            subprocess.run(mri_command, shell=True)
+            mris_command = f'mris_convert {wm_path} {wm_vtk_path}'
+            subprocess.run(mris_command, shell=True)
 
         sphere = utils.ReadSurf(sphere_vtk_path)
-        sphere = self.set_wm_as_textures(sphere, wm_vtk_path)
+        sphere = self.set_wm_as_texture(sphere, wm_vtk_path)
         vertex_features = torch.cat(l_features,dim=1)
 
         #Y
         Y = torch.tensor([int(row[self.name_class])])
 
         #Sphere per hemisphere
-        verts, faces, edges = utils.PolyDataToTensors(sphere)
+        verts, faces = utils.PolyDataToTensors_v_f(sphere)
 
         #Transformations
         if self.transform:        
             verts = self.transform(verts)
 
-        #Face Features
+        # Face Features
         faces_pid0 = faces[:,0:1]       
         
         face_features = torch.cat([torch.take(vf, faces_pid0) for vf in vertex_features.transpose(0, 1)], dim=-1)
+        
+        return verts, faces, vertex_features, face_features, Y
 
-        return verts,faces,vertex_features,face_features,Y
 
-
-
-class BrainDataModule_fs(pl.LightningDataModule):
-    def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6, pin_memory=False, persistent_workers=False,name_class='ASD_administered',freesurfer_path=None):
+class SaxiIcoDataModule_fs(pl.LightningDataModule):
+    def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 
         self.data_train = data_train
@@ -473,12 +422,9 @@ class BrainDataModule_fs(pl.LightningDataModule):
         self.train_transform = train_transform
         self.val_and_test_transform = val_and_test_transform
         self.num_workers = num_workers
-        self.pin_memory = pin_memory
-        self.persistent_workers = persistent_workers
         self.name_class = name_class
         self.freesurfer_path = freesurfer_path
 
-        ### weights computing
         self.weights = []
         self.df_train = pd.read_csv(self.data_train)
         self.df_val = pd.read_csv(self.data_val)
@@ -502,20 +448,10 @@ class BrainDataModule_fs(pl.LightningDataModule):
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = BrainDataset_fs(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.val_dataset = BrainDataset_fs(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.test_dataset = BrainDataset_fs(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-
+        self.train_dataset = SaxiIcoDataset_fs(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.val_dataset = SaxiIcoDataset_fs(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.test_dataset = SaxiIcoDataset_fs(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         VL, FL, VFL, FFL,VR, FR, VFR, FFR, Y = self.train_dataset.__getitem__(0)
-        self.nbr_features = VFL.shape[1]
-
-    def repeat_subject(self,df,final_size):
-        n = len(df)
-        q,r = final_size//n,final_size%n
-        list_df = [df for i in range(q)]
-        list_df.append(df[:r])
-        new_df = pd.concat(list_df).reset_index().drop(['index'],axis=1)
-        return new_df
 
     def pad_verts_faces(self, batch):
         verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
@@ -527,7 +463,6 @@ class BrainDataModule_fs(pl.LightningDataModule):
         vertex_features_r = [vfr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
         face_features_r = [ffr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
         Y = [y for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]     
-
 
         verts_l = pad_sequence(verts_l, batch_first=True, padding_value=0.0) 
         faces_l = pad_sequence(faces_l, batch_first=True, padding_value=-1)
@@ -541,17 +476,14 @@ class BrainDataModule_fs(pl.LightningDataModule):
 
         return verts_l, faces_l, vertex_features_l, face_features_l, verts_r, faces_r, vertex_features_r, face_features_r, Y
     
-    def train_dataloader(self):    
-        return DataLoader(self.train_dataset,batch_size=self.batch_size,shuffle=True, num_workers=self.num_workers, pin_memory=self.pin_memory, persistent_workers=self.persistent_workers, drop_last=True, collate_fn=self.pad_verts_faces)
+    def train_dataloader(self):  
+        return DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=self.pin_memory, persistent_workers=self.persistent_workers, drop_last=True, collate_fn=self.pad_verts_faces)        
+        return DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)        
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=self.pin_memory, persistent_workers=self.persistent_workers, drop_last=True, collate_fn=self.pad_verts_faces)
-
-    def get_features(self):
-        return self.nbr_features
+        return DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)
 
     def get_weigths(self):
         return self.weights

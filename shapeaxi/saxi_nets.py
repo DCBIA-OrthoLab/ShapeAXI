@@ -26,10 +26,11 @@ from io import BytesIO
 import json
 import os
 
-import utils
-from IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
-from saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, SelfAttention, Identity, TimeDistributed
-from colors import bcolors
+
+from . import utils
+from .IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
+from .saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, SelfAttention, Identity, TimeDistributed
+from .colors import bcolors
 
 
 class ProjectionHead(nn.Module):
@@ -92,7 +93,11 @@ class SelfAttention(nn.Module):
         return context_vector, score
 
 
-########################################################################## CLASSIFICATION PART ######################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                       Classification                                                                              #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class SaxiClassification(pl.LightningModule):
@@ -222,7 +227,11 @@ class SaxiClassification(pl.LightningModule):
         self.log("val_acc", self.accuracy, batch_size=batch_size, sync_dist=True)
 
 
-################################################################################# SAXIREGRESSION PART ################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                        Regression                                                                                 #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class SaxiRegression(pl.LightningModule):
@@ -357,7 +366,11 @@ class SaxiRegression(pl.LightningModule):
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
 
 
-#################################################################################### MONAIUNET PART #########################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                          Monai                                                                                    #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class MonaiUNet(pl.LightningModule):
@@ -507,7 +520,11 @@ class MonaiUNet(pl.LightningModule):
         return {'test_loss': loss, 'test_correct': self.accuracy}
 
 
-##################################################################################### ICOCONV PART ########################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                         IcoConv                                                                                   #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class SaxiIcoClassification(pl.LightningModule):
@@ -518,9 +535,9 @@ class SaxiIcoClassification(pl.LightningModule):
         self.y_true = []
 
         ico_sphere = utils.CreateIcosahedron(self.hparams.radius, self.hparams.ico_lvl)
-        ico_sphere_verts, ico_sphere_faces, self.hparams.ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
+        ico_sphere_verts, ico_sphere_faces, self.ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
         self.ico_sphere_verts = ico_sphere_verts
-        self.ico_sphere_edges = np.array(self.hparams.ico_sphere_edges)
+        self.ico_sphere_edges = np.array(self.ico_sphere_edges)
         R=[]
         T=[]
         for coords_cam in self.ico_sphere_verts.tolist():
@@ -540,17 +557,17 @@ class SaxiIcoClassification(pl.LightningModule):
         self.drop = nn.Dropout(p=self.hparams.dropout_lvl)
         self.noise = GaussianNoise(mean=0.0, std=self.hparams.noise_lvl)
 
-        out_size = self.hparams.out_classes
+
         # Left path
-        self.create_network('L', out_size)
+        self.create_network('L', self.hparams.out_size)
         # Right path
-        self.create_network('R', out_size)
+        self.create_network('R', self.hparams.out_size)
 
         #Demographics
         self.normalize = nn.BatchNorm1d(self.hparams.nbr_demographic)
 
         #Final layer
-        self.Classification = nn.Linear(2*out_size+self.hparams.nbr_demographic, 2)
+        self.Classification = nn.Linear(2*self.hparams.out_size+self.hparams.nbr_demographic, 2)
 
         #Loss
         self.loss_train = nn.CrossEntropyLoss(weight=self.hparams.weights[0])
@@ -558,8 +575,8 @@ class SaxiIcoClassification(pl.LightningModule):
         self.loss_test = nn.CrossEntropyLoss(weight=self.hparams.weights[2])
 
         #Accuracy
-        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=2,average='macro')
-        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=2,average='macro')
+        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
+        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
         
         # Initialize a perspective camera.
         self.hparams.cameras = FoVPerspectiveCameras()
@@ -604,19 +621,18 @@ class SaxiIcoClassification(pl.LightningModule):
         
         self.convnet = template_model(**model_params)
         setattr(self, f'TimeDistributed{side}', TimeDistributed(self.convnet))
-        output_size = model_params.get('num_classes', None)
 
         if self.hparams.layer == 'Att':
-            setattr(self, f'WV{side}', nn.Linear(output_size, out_size))
-            setattr(self, f'Attention{side}', SelfAttention(output_size, 128))
+            setattr(self, f'WV{side}', nn.Linear(self.hparams.hidden_dim, out_size))
+            setattr(self, f'Attention{side}', SelfAttention(self.hparams.hidden_dim, out_size))
 
         elif self.hparams.layer in {'IcoConv2D', 'IcoConv1D', 'IcoLinear'}:
             if self.hparams.layer == 'IcoConv2D':
-                conv_layer = nn.Conv2d(output_size, out_size, kernel_size=(3, 3), stride=2, padding=0)
+                conv_layer = nn.Conv2d(self.hparams.hidden_dim, out_size, kernel_size=(3, 3), stride=2, padding=0)
             elif self.hparams.layer == 'IcoConv1D':
-                conv_layer = nn.Conv1d(output_size, out_size, 7)
+                conv_layer = nn.Conv1d(self.hparams.hidden_dim, out_size, 7)
             else:
-                conv_layer = nn.Linear(output_size * 7, out_size)
+                conv_layer = nn.Linear(self.hparams.hidden_dim * 7, out_size)
             icosahedron = IcosahedronConv2d(conv_layer, self.ico_sphere_verts, self.ico_sphere_edges)
             avgpool = AvgPoolImages(nbr_images=self.nbr_cam)
             setattr(self, f'IcosahedronConv2d{side}', icosahedron)
@@ -628,7 +644,6 @@ class SaxiIcoClassification(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
-
         return optimizer
 
 
@@ -656,7 +671,6 @@ class SaxiIcoClassification(pl.LightningModule):
     def get_features(self,VL,FL,VFL,FFL,VR,FR,VFR,FFR,demographic):
         #########Left path
         xL, PF = self.render(VL,FL,VFL,FFL)   
-        B,NV,C,L,W = xL.size()
         xL = self.TimeDistributedL(xL)
         if self.Is_it_Icolayer(self.hparams.layer):
             xL = self.IcosahedronConv2dL(xL)
@@ -692,6 +706,7 @@ class SaxiIcoClassification(pl.LightningModule):
         for i in range(self.nbr_cam):
             pix_to_face = self.GetView(meshes,i)
             PF.append(pix_to_face.unsqueeze(dim=1))
+
         PF = torch.cat(PF, dim=1)
         l_features = []
         for index in range(FF.shape[-1]):
@@ -699,6 +714,7 @@ class SaxiIcoClassification(pl.LightningModule):
         x = torch.cat(l_features,dim=2)
 
         return x, PF
+
 
     def training_step(self, train_batch, batch_idx):
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, demographic, Y = train_batch
@@ -773,7 +789,11 @@ class SaxiIcoClassification(pl.LightningModule):
         return (layer[:3] == 'Ico')
 
 
-################################################################################# ICOCONV FREESURFER PART ########################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                    IcoConv Freesurfer                                                                             #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class SaxiIcoClassification_fs(pl.LightningModule):
@@ -784,9 +804,9 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         self.y_true = []
 
         ico_sphere = utils.CreateIcosahedron(self.hparams.radius, self.hparams.ico_lvl)
-        ico_sphere_verts, ico_sphere_faces, self.hparams.ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
+        ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
         self.ico_sphere_verts = ico_sphere_verts
-        self.ico_sphere_edges = np.array(self.hparams.ico_sphere_edges)
+        self.ico_sphere_edges = ico_sphere_edges
         R=[]
         T=[]
         for coords_cam in self.ico_sphere_verts.tolist():
@@ -806,43 +826,33 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         self.drop = nn.Dropout(p=self.hparams.dropout_lvl)
         self.noise = GaussianNoise(mean=0.0, std=self.hparams.noise_lvl)
 
-        out_size = self.hparams.out_classes
         # Left path
-        self.create_network('L', out_size)
+        self.create_network('L', self.hparams.out_size)
         # Right path
-        self.create_network('R', out_size)
+        self.create_network('R', self.hparams.out_size)
 
         #Loss
         self.loss_train = nn.CrossEntropyLoss()
         self.loss_val = nn.CrossEntropyLoss()
         self.loss_test = nn.CrossEntropyLoss()
 
+        #Final layer 
+        self.Classification = nn.Linear(2*self.hparams.out_size, 2)
+
         #Accuracy
-        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=2,average='macro')
-        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=2,average='macro')
+        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
+        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
         
         # Initialize a perspective camera.
         self.hparams.cameras = FoVPerspectiveCameras()
 
         # We will also create a Phong renderer. This is simpler and only needs to render one face per pixel.
-        raster_settings = RasterizationSettings(
-            image_size=self.hparams.image_size,
-            blur_radius=0,
-            faces_per_pixel=1,
-            max_faces_per_bin=100000
-        )
+        raster_settings = RasterizationSettings(image_size=self.hparams.image_size,blur_radius=0,faces_per_pixel=1,max_faces_per_bin=100000)
 
         lights = AmbientLights()
-        rasterizer = MeshRasterizer(
-                cameras=self.hparams.cameras,
-                raster_settings=raster_settings
-        )
+        rasterizer = MeshRasterizer(cameras=self.hparams.cameras,raster_settings=raster_settings)
 
-        self.hparams.phong_renderer = MeshRendererWithFragments(
-            rasterizer=rasterizer,
-            shader=HardPhongShader(cameras=self.hparams.cameras, lights=lights)
-        )
-        
+        self.hparams.phong_renderer = MeshRendererWithFragments(rasterizer=rasterizer,shader=HardPhongShader(cameras=self.hparams.cameras, lights=lights))        
     
     def to(self, device=None):
         # Move the renderer to the specified device
@@ -863,21 +873,19 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         model_params = eval('dict(%s)' % self.hparams.base_encoder_params.replace(' ',''))
         
         self.convnet = template_model(**model_params)
-
         setattr(self, f'TimeDistributed{side}', TimeDistributed(self.convnet))
-        output_size = model_params.get('num_classes', None)
 
         if self.hparams.layer == 'Att':
-            setattr(self, f'WV{side}', nn.Linear(output_size, out_size))
-            setattr(self, f'Attention{side}', SelfAttention(output_size, 128))
+            setattr(self, f'WV{side}', nn.Linear(self.hparams.hidden_dim, out_size))
+            setattr(self, f'Attention{side}', SelfAttention(self.hparams.hidden_dim, out_size))
 
         elif self.hparams.layer in {'IcoConv2D', 'IcoConv1D', 'IcoLinear'}:
             if self.hparams.layer == 'IcoConv2D':
-                conv_layer = nn.Conv2d(output_size, out_size, kernel_size=(3, 3), stride=2, padding=0)
+                conv_layer = nn.Conv2d(self.hparams.hidden_dim, out_size, kernel_size=(3, 3), stride=2, padding=0)
             elif self.hparams.layer == 'IcoConv1D':
-                conv_layer = nn.Conv1d(output_size, out_size, 7)
+                conv_layer = nn.Conv1d(self.hparams.hidden_dim, out_size, 7)
             else:
-                conv_layer = nn.Linear(output_size * 7, out_size)
+                conv_layer = nn.Linear(self.hparams.hidden_dim * 7, out_size)
             icosahedron = IcosahedronConv2d(conv_layer, self.ico_sphere_verts, self.ico_sphere_edges)
             avgpool = AvgPoolImages(nbr_images=self.nbr_cam)
             setattr(self, f'IcosahedronConv2d{side}', icosahedron)
@@ -906,9 +914,11 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         ###Resnet18+Ico+Concatenation
         xL = self.get_features(VL,FL,VFL,FFL,'L')
         xR = self.get_features(VR,FR,VFR,FFR,'R')
-        x = torch.cat([xL,xR],dim=1)
-        ###Last classification layer
+        l_left_right = [xL,xR]
+        x = torch.cat(l_left_right,dim=1)
+        # ###Last classification layer
         x = self.drop(x)
+        x = self.Classification(x)
 
         return x
 
@@ -918,7 +928,6 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         x = getattr(self, f'TimeDistributed{side}')(x)
         x = getattr(self, f'IcosahedronConv2d{side}')(x)
         x = getattr(self, f'pooling{side}')(x) 
-
         return x
 
 
@@ -934,6 +943,7 @@ class SaxiIcoClassification_fs(pl.LightningModule):
             pix_to_face = self.GetView(meshes,i)
             PF.append(pix_to_face.unsqueeze(dim=1))
         PF = torch.cat(PF, dim=1)
+
         l_features = []
         for index in range(FF.shape[-1]):
             l_features.append(torch.take(FF[:,index],PF)*(PF >= 0)) # take each feature for each pictures
@@ -948,8 +958,8 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         loss = self.loss_train(x,Y)
         self.log('train_loss', loss) 
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        self.train_accuracy(predictions.reshape(-1, 1), Y.reshape(-1, 1))
-        self.log("train_acc", self.train_accuracy)           
+        self.train_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
 
         return loss
 
@@ -957,12 +967,11 @@ class SaxiIcoClassification_fs(pl.LightningModule):
     def validation_step(self,val_batch,batch_idx):
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = val_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-        # Y = Y.squeeze(dim=1) 
         loss = self.loss_val(x,Y)
         self.log('val_loss', loss)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        val_acc = self.val_accuracy(predictions.reshape(-1, 1), Y.reshape(-1, 1))
-        self.log("val_acc", val_acc)   
+        val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
 
         return val_acc
 
@@ -970,7 +979,6 @@ class SaxiIcoClassification_fs(pl.LightningModule):
     def test_step(self,test_batch,batch_idx):
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-        # Y = Y.squeeze(dim=1)     
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
@@ -1015,7 +1023,11 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         return (layer[:3] == 'Ico')
 
 
-#################################################################################### SEGMENTATION PART ########################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                       Segmentation                                                                                #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class SaxiSegmentation(pl.LightningModule):
@@ -1146,7 +1158,11 @@ class SaxiSegmentation(pl.LightningModule):
         return {'test_loss': loss, 'test_correct': self.accuracy}
 
 
-################################################################################# DENTAL MODEL SEGMENTATION #########################################################################################
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                 Dental Model Segmentation                                                                         #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
 class DentalModelSeg(pl.LightningModule):

@@ -5,9 +5,6 @@ import torch
 from torch import nn
 import pytorch3d
 from torchvision import transforms
-from pl_bolts.transforms.dataset_normalizations import (
-    imagenet_normalization
-)
 import sys
 import platform
 system = platform.system()
@@ -19,7 +16,7 @@ sys.path.append(code_path)
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
 
-import utils
+from . import utils
 
 # File which is a composition of transformations to be applied during training
 
