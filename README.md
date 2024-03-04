@@ -35,23 +35,13 @@ pip install shapeaxi
 
 ### Installation of pytorch3d 
 
-For this installation, we are going to use a variable, {YOURVERSION}, because this installation is specific to each computer configuration.
-First, you can run **ipython** in the terminal (or **python -m IPython** if it is not working).  
-You can now add paste these lines :
+For this installation, we are going to use a variable, **{YOURVERSION}**, because this installation is specific to each computer configuration.
+First, you can run this line to print the content of the variable **{YOURVERSION}** that we will use :
 ```bash
-import sys
-import torch
-pyt_version_str=torch.__version__.split("+")[0].replace(".", "")
-version_str="".join([
-    f"py3{sys.version_info.minor}_cu",
-    torch.version.cuda.replace(".",""),
-    f"_pyt{pyt_version_str}"
-])
-print(version_str)
+python -c "import sys; import torch; pyt_version_str=torch.__version__.split('+')[0].replace('.', ''); version_str=''.join([f'py3{sys.version_info.minor}_cu', torch.version.cuda.replace('.', ''), f'_pyt{pyt_version_str}']); print(version_str)"
 ```
 It will print something like this : **py39_cu117_pyt201**.  
-This is the content of your variable {YOURVERSION}.
-- Finally, exit of ipython and in your terminal you can run this line by adding your editing {YOURVERSION}, 
+- Finally, you can run this line by adding your editing **{YOURVERSION}**, 
 ```bash
 pip install --no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/{YOURVERSION}/download.html
 ```
@@ -187,8 +177,8 @@ Output:
 
 The first step of the code is to compute a global scale factor for all shapes in the population.  
 If you want to do this, add ```--compute_scale_factor 1```.  
-Moreover, if you already has a column with scale_factor in your csv file, specify it with ```--column_scale_factor name_of_your_column```.
-Otherwise, if you do not want to compute a global scale factor, do not specify anything and it will skip thie part.  
+Moreover, if you already has a column with **scale_factor** in your csv file, specify it with ```--column_scale_factor name_of_your_column```.
+Otherwise, if you do not want to compute a global scale factor, do not specify anything and it will skip this part.  
 
 
 ### 2. Split
@@ -213,7 +203,7 @@ Here, an example of the content of you csv files :
 ### 3. Training 
 
 For this step, there are one training, validation and testing dataset for each fold. You can choose for the training : batch size, maximum number of epochs, model you want.  
-If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold 
+If you want, you can specify ```--csv_train```, ```--csv_test``` and ```--csv_valid``` for each fold.
 
 ### 4. Test, evaluation, aggregate and explainability
 
