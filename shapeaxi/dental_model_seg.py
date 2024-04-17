@@ -19,96 +19,64 @@ from .saxi_transforms import UnitSurfTransform
 
 def main(args):
     print(bcolors.INFO, "Start prediction of your data", bcolors.ENDC)
+
     out_channels = 34
     device = args.device
 
-    if args.model == 'None':
-        model = saxi_nets.DentalModelSeg(device=device)
-    else:
-        model = saxi_nets.DentalModelSeg(custom_model=args.model, device=device)
+    model = saxi_nets.DentalModelSeg(custom_model=args.model, device=device)
 
     # Check if the input is a vtk file or a csv file
-    if args.csv != 'None':
+    if args.csv is not None:
         # Loading of the data
         path_csv = os.path.join(args.csv)
         df = pd.read_csv(path_csv)
         fname = os.path.basename(args.csv)
-        ds, dataloader, model, softmax = load_data(df, args, model, device)
-        
-        # Creation of the dictionary to store the predictions in a csv file with the same format as the input csv file (input vtk path/prediction vtk path)
         predictions = {"surf": [], "pred": []}
+
+    else:
+        fname = os.path.basename(args.surf)
+        df = pd.DataFrame([{"surf": args.surf, "out": args.out}])
+    
+    ds, dataloader, model, softmax = load_data(df, args, model, device)
+    # Creation of the dictionary to store the predictions in a csv file with the same format as the input csv file (input vtk path/prediction vtk path)
         
-        with torch.no_grad():
-            # We go through the dataloader to get the prediction of the model
-            for idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-                
-                # Prediction of the model on the input data
-                surf, V_labels_prediction = prediction(model, batch, out_channels, device, softmax, ds, idx, args)
-                # Post processing on the data (closing operation, remove islands, etc)
-                post_processing(surf, V_labels_prediction, out_channels)
+    with torch.no_grad():
+        # We go through the dataloader to get the prediction of the model
+        for idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+            
+            # Prediction of the model on the input data
+            surf, V_labels_prediction = prediction(model, batch, out_channels, device, softmax, ds, idx, args)
+            # Post processing on the data (closing operation, remove islands, etc)
+            post_processing(surf, V_labels_prediction, out_channels)
 
-                if args.fdi == 1:
-                    surf = ConvertFDI(surf, args)
-                
-                # Save the data in a vtk file
+            if args.fdi == 1:
+                surf = ConvertFDI(surf, args)
+            
+
+            # Save the data in a vtk file
+            if args.csv is not None:
                 output_fn = save_data_vtk_from_csv(df, surf, fname, args, idx)
-                output_fn = os.path.normpath(output_fn)
+            else:
+                output_fn = save_data_vtk(df, surf, fname, args, idx)
+            output_fn = os.path.normpath(output_fn)
 
+            if args.csv is not None:
                 # Add this prediciton in the predictions dictionary of the csv file
                 predictions["surf"].append(df["surf"][idx])
                 predictions["pred"].append(output_fn) 
 
-                if args.crown_segmentation == 'True':
-                    #Extraction of the vtk_file name to create a folder with the same name and store all the teeth files in this folder
-                    path_data = os.path.splitext(output_fn)[0]
-                    if not os.path.exists(path_data):
-                        os.makedirs(path_data) 
-                    path_data = os.path.normpath(path_data)
-                    data_filename = os.path.basename(path_data)
-                    #Segmentation of each tooth in a specific vtk file
-                    segmentation_crown(surf, args, data_filename, path_data)
-            
+            if args.crown_segmentation:
+                #Extraction of the vtk_file name to create a folder with the same name and store all the teeth files in this folder
+                path_data = os.path.splitext(output_fn)[0]
+                if not os.path.exists(path_data):
+                    os.makedirs(path_data) 
+                path_data = os.path.normpath(path_data)
+                data_filename = os.path.basename(path_data)
+                #Segmentation of each tooth in a specific vtk file
+                segmentation_crown(surf, args, data_filename, path_data)
         
+    if args.csv is not None:
         save_csv(predictions, args)
-
-
-    else:
-        # If it is a vtk file, we create a dataframe with the path of the vtk file and the output directory
-        if args.stl == 'None' :
-            fname = os.path.basename(args.vtk)
-            df = pd.DataFrame([{"surf": args.vtk, "out": args.out}])
-        else:
-            fname = os.path.basename(args.stl)
-            df = pd.DataFrame([{"surf": args.stl, "out": args.out}])
-        
-        ds, dataloader, model, softmax = load_data(df, args, model, device)
-
-        with torch.no_grad():
-            # We go through the dataloader to get the prediction of the model
-            for idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-                
-                # Prediction of the model on the input data
-                surf, V_labels_prediction = prediction(model, batch, out_channels, device, softmax, ds, idx, args)    
-                # Post processing on the data (closing operation, remove islands, etc)
-                post_processing(surf, V_labels_prediction, out_channels)  
-
-                if args.fdi == 1:
-                    surf = ConvertFDI(surf, args)
-                
-                # Save the data in a vtk file
-                output_fn = save_data_vtk(df, surf, fname, args, idx)
-                output_fn = os.path.normpath(output_fn)
-
-                if args.crown_segmentation == 'True':
-                    #Extraction of the vtk_file name to create a folder with the same name and store all the teeth files in this folder
-                    path_data = os.path.splitext(output_fn)[0]
-                    if not os.path.exists(path_data):
-                        os.makedirs(path_data) 
-                    data_dir = os.path.normpath(path_data)
-                    data_filename = os.path.basename(data_dir)
-                    #Segmentation of each tooth in a specific vtk file
-                    segmentation_crown(surf, args, data_filename, data_dir)
-
 
 # Load the data
 def load_data(df, args, model, device):
@@ -118,7 +86,6 @@ def load_data(df, args, model, device):
     model.eval()
     softmax = torch.nn.Softmax(dim=2)
     return ds, dataloader, model, softmax
-
 
 # Prediction using the model
 def prediction( model, batch, out_channels, device, softmax, ds, idx, args):
@@ -167,12 +134,12 @@ def save_data_vtk(df, surf, fname, args, idx):
     os.makedirs(args.out, exist_ok=True)
     ext = os.path.splitext(fname)[1]
 
-    if args.overwrite == 'True': 
+    if args.overwrite: 
         # If the overwrite argument is true, the original file is overwritten by the prediction file
         if ext == ".stl":
             os.remove(args.stl)
-        utils.Write(surf, args.vtk, print_out=False)
-        output_fn = args.vtk
+        utils.Write(surf, args.surf, print_out=False)
+        output_fn = args.surf
         print(bcolors.SUCCESS,f"Saving results to {output_fn}", bcolors.ENDC)
 
     else:
@@ -191,8 +158,16 @@ def save_data_vtk_from_csv(df, surf, fname, args, idx):
     ext = os.path.splitext(df["surf"][idx])[1]
 
     # Same thing as above but with csv file
-    if args.overwrite == 'False':
-        # Creation of the output path for the vtk file without the path from th vtk_folder
+    if args.overwrite:
+        if ext == ".stl":
+            os.remove(df["surf"][idx])
+        new_filename = filename + ".vtk"
+        output_fn = new_filename
+        utils.Write(surf, output_fn, print_out=False)
+        print(bcolors.SUCCESS,f"Saving results to {output_fn}", bcolors.ENDC)
+
+    else:
+        # Creation of the output path for the vtk file without the path from the vtk_folder
         new_filename = filename + f"_{args.suffix}.vtk"
         true_vtk_path = new_filename.replace(args.vtk_folder, "")
 
@@ -204,14 +179,6 @@ def save_data_vtk_from_csv(df, surf, fname, args, idx):
         os.makedirs(directory, exist_ok=True)
         print(bcolors.SUCCESS,f"Saving results to {output_fn}", bcolors.ENDC)
         utils.Write(surf , output_fn, print_out=False)
-
-    else:
-        if ext == ".stl":
-            os.remove(df["surf"][idx])
-        new_filename = filename + ".vtk"
-        output_fn = new_filename
-        utils.Write(surf, output_fn, print_out=False)
-        print(bcolors.SUCCESS,f"Saving results to {output_fn}", bcolors.ENDC)
     
     return output_fn
 
@@ -242,13 +209,14 @@ def save_csv(predictions, args):
     predictions_df = pd.DataFrame(predictions)
     csv_filename = os.path.splitext(os.path.basename(args.csv))[0]
     
-    if args.overwrite == 'False':
-        # Save the dataframe in a csv file
-        predictions_csv_path = os.path.join(args.out, f"{csv_filename}_{args.suffix}.csv")
+    if args.overwrite:
+        predictions_csv_path = args.csv
         predictions_df.to_csv(predictions_csv_path, index=False)
         print(bcolors.SUCCESS,f"Saving results to {predictions_csv_path}", bcolors.ENDC)
+
     else:
-        predictions_csv_path = args.csv
+        # Save the dataframe in a csv file
+        predictions_csv_path = os.path.join(args.out, f"{csv_filename}_{args.suffix}.csv")
         predictions_df.to_csv(predictions_csv_path, index=False)
         print(bcolors.SUCCESS,f"Saving results to {predictions_csv_path}", bcolors.ENDC)
 
@@ -273,26 +241,20 @@ def get_argparse():
     parser = argparse.ArgumentParser(description='Evaluate classification result')
     
     # Create a mutually exclusive group for --vtk and --csv
-    parser.add_argument('--vtk', type=str, help='Path to your vtk file', default='None')
-    parser.add_argument('--csv', type=str, help='Path to your csv file', default='None')
-    parser.add_argument('--stl', type=str, help='Path to your stl file', default='None')
-    parser.add_argument('--model', type=str, help='Path to the model', default='None')
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--surf', type=str, help='Path to your vtk file',default=None)
+    input_group.add_argument('--csv', type=str, help='Path to your csv file',default=None)
+
+    parser.add_argument('--model', type=str, help='Path to the model', default=None)
     parser.add_argument('--suffix', type=str, help='Suffix of the prediction', default='pred')
     parser.add_argument('--out', type=str, help='Output directory', default='./predictions')
     parser.add_argument('--num_workers', type=int, help='Number of workers for loading', default=4)
-    parser.add_argument('--crown_segmentation', type=str, help='Isolation of each different tooth in a specific vtk file', default='False')
+    parser.add_argument('--crown_segmentation', type=int, help='Isolation of each different tooth in a specific vtk file', default=None)
     parser.add_argument('--array_name', type=str, help = 'Predicted ID array name for output vtk', default="PredictedID")
-    parser.add_argument('--fdi', type=int, help = 'numbering system. 0: universal numbering; 1: FDI world dental Federation notation', default=0)
-    parser.add_argument('--overwrite', type=str, help='Overwrite the input vtk file', default='False')
+    parser.add_argument('--fdi', type=int, help = 'Numbering system. 0: Universal numbering; 1: FDI world dental Federation notation', default=0)
+    parser.add_argument('--overwrite', type=int, help='Overwrite the input vtk file', default=None)
     parser.add_argument('--device', type=str, help='Device to use for inference', default='cuda:0',choices=['cpu', 'cuda:0'])
     parser.add_argument('--vtk_folder', type=str, help='Path to tronquate your input path', default='')
-
-    # Check if at least one of vtk, csv, or stl is provided
-    args, _ = parser.parse_known_args()
-    if not any([args.vtk, args.csv, args.stl]):
-        print("Error: You must provide at least one of --vtk, --csv, or --stl.")
-        parser.print_help()
-        sys.exit(1)
 
     return parser
 

@@ -18,6 +18,7 @@ from fsl.data import gifti
 from tqdm import tqdm
 from sklearn.utils import class_weight
 import platform
+import json
 system = platform.system()
 if system == 'Windows':
   code_path = '\\'.join(os.path.dirname(os.path.abspath(__file__)).split('\\')[:-1])
@@ -179,47 +180,46 @@ class SaxiIcoDataset(Dataset):
 
 
     def getitem_per_hemisphere(self,hemisphere,idx):
-            
-            # Load Data
-            row = self.df.loc[idx]
-            path_eacsf = row[f'Path{"Left" if hemisphere=="left" else "Right"}EACSF']
-            path_sa = row[f'Path{"Left" if hemisphere=="left" else "Right"}Sa']
-            path_thickness = row[f'Path{"Left" if hemisphere=="left" else "Right"}Thickness']
+        # Load Data
+        row = self.df.loc[idx]
+        path_eacsf = row[f'Path{"Left" if hemisphere=="left" else "Right"}EACSF']
+        path_sa = row[f'Path{"Left" if hemisphere=="left" else "Right"}Sa']
+        path_thickness = row[f'Path{"Left" if hemisphere=="left" else "Right"}Thickness']
 
-            l_features = [
-                self.data_to_tensor(path_eacsf).unsqueeze(dim=1),
-                self.data_to_tensor(path_sa).unsqueeze(dim=1),
-                self.data_to_tensor(path_thickness).unsqueeze(dim=1)
-            ]
+        l_features = [
+            self.data_to_tensor(path_eacsf).unsqueeze(dim=1),
+            self.data_to_tensor(path_sa).unsqueeze(dim=1),
+            self.data_to_tensor(path_thickness).unsqueeze(dim=1)
+        ]
 
-            reader = utils.ReadSurf(self.list_path_ico[0 if hemisphere=="left" else 1])
+        reader = utils.ReadSurf(self.list_path_ico[0 if hemisphere=="left" else 1])
 
-            vertex_features = torch.cat(l_features,dim=1)
+        vertex_features = torch.cat(l_features,dim=1)
 
-            #Demographics
-            demographic_values = [float(row[name]) for name in self.list_demographic]
-            demographic = torch.tensor(demographic_values)
+        #Demographics
+        demographic_values = [float(row[name]) for name in self.list_demographic]
+        demographic = torch.tensor(demographic_values)
 
-            #Y
-            Y = torch.tensor([int(row[self.name_class])])
+        #Y
+        Y = torch.tensor([int(row[self.name_class])])
 
-            #Sphere per hemisphere
-            verts, faces = utils.PolyDataToTensors_v_f(reader)
-            nb_faces = len(faces)
+        #Sphere per hemisphere
+        verts, faces = utils.PolyDataToTensors_v_f(reader)
+        nb_faces = len(faces)
 
-            #Transformations
-            if self.transform:        
-                verts = self.transform(verts)
+        #Transformations
+        if self.transform:        
+            verts = self.transform(verts)
 
-            #Face Features
-            faces_pid0 = faces[:,0:1]         
+        #Face Features
+        faces_pid0 = faces[:,0:1]         
+    
+        offset = torch.zeros((nb_faces,vertex_features.shape[1]), dtype=int) + torch.Tensor([i for i in range(vertex_features.shape[1])]).to(torch.int64)
+        faces_pid0_offset = offset + torch.multiply(faces_pid0, vertex_features.shape[1])      
         
-            offset = torch.zeros((nb_faces,vertex_features.shape[1]), dtype=int) + torch.Tensor([i for i in range(vertex_features.shape[1])]).to(torch.int64)
-            faces_pid0_offset = offset + torch.multiply(faces_pid0, vertex_features.shape[1])      
-            
-            face_features = torch.take(vertex_features,faces_pid0_offset)
+        face_features = torch.take(vertex_features,faces_pid0_offset)
 
-            return verts, faces,vertex_features,face_features,demographic, Y
+        return verts, faces,vertex_features,face_features,demographic, Y
 
 
 class SaxiIcoDataModule(pl.LightningDataModule):
@@ -300,12 +300,14 @@ class SaxiIcoDataModule(pl.LightningDataModule):
 
 
 class SaxiIcoDataset_fs(Dataset):
-    def __init__(self,df,transform = None,version=None,name_class ='fsqc_qc',freesurfer_path=None):
+    def __init__(self,df,transform = None,version=None,name_class ='fsqc_qc',freesurfer_path=None,normalize_features=False,path_to_csv=None):
         self.df = df
         self.transform = transform
         self.version = version
         self.name_class = name_class
         self.freesurfer_path = freesurfer_path
+        self.normalize_features = normalize_features
+        self.path_to_csv = path_to_csv
 
     def __len__(self):
         return(len(self.df)) 
@@ -321,15 +323,7 @@ class SaxiIcoDataset_fs(Dataset):
         data = data.byteswap().newbyteorder()
         data = torch.from_numpy(data).float()
         return data
-    
-    def convert_txt(self,path_data):
-        data = nib.freesurfer.read_morph_data(path_data)
-        data_txt = path_data + '.txt'
-        with open(data_txt, 'w') as file:
-            for features in data:
-                file.write(str(features) + '\n')
 
-        return data_txt
 
     def set_wm_as_texture(self, sphere, wm_path):
         # Create the vtkPolyDataNormals filter
@@ -370,11 +364,19 @@ class SaxiIcoDataset_fs(Dataset):
         path_curvature = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.curv')
         path_sulc = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sulc')
 
+        # path_white_intensity = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white_int.vtk')
+        # path_pial_intensity = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.pial_int.vtk')
+
+        # features_white_intensity = utils.GetPropertyArray(utils.ReadSurf(path_white_intensity), "Intensity")
+        # features_white_intensity = torch.unsqueeze(torch.tensor(features_white_intensity), dim=1)
+        # features_pial_intensity = utils.GetPropertyArray(utils.ReadSurf(path_pial_intensity), "Intensity")
+        # features_pial_intensity = torch.unsqueeze(torch.tensor(features_pial_intensity), dim=1)
+
         l_features = [
             self.data_to_tensor(path_sa).unsqueeze(dim=1),
             self.data_to_tensor(path_thickness).unsqueeze(dim=1),
             self.data_to_tensor(path_curvature).unsqueeze(dim=1),
-            self.data_to_tensor(path_sulc).unsqueeze(dim=1)
+            self.data_to_tensor(path_sulc).unsqueeze(dim=1),
         ]
 
         # Convert sphere and white matter to vtk
@@ -382,6 +384,13 @@ class SaxiIcoDataset_fs(Dataset):
         sphere_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg.vtk')
         wm_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white')
         wm_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white.vtk')
+
+        paths = [path_sa, path_thickness, path_curvature, path_sulc, sphere_path, wm_path, sphere_vtk_path, wm_vtk_path]
+
+        for path in paths:
+            if not os.path.exists(path):
+                print(f'File {path} does not exist')
+                return
 
         if not os.path.exists(sphere_vtk_path):
             mris_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
@@ -392,7 +401,8 @@ class SaxiIcoDataset_fs(Dataset):
 
         sphere = utils.ReadSurf(sphere_vtk_path)
         sphere = self.set_wm_as_texture(sphere, wm_vtk_path)
-        vertex_features = torch.cat(l_features,dim=1)
+
+        vertex_features = torch.cat(l_features, dim=1)
 
         #Y
         Y = torch.tensor([int(row[self.name_class])])
@@ -413,7 +423,7 @@ class SaxiIcoDataset_fs(Dataset):
 
 
 class SaxiIcoDataModule_fs(pl.LightningDataModule):
-    def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
+    def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None,normalize_features=False):
         super().__init__()
         self.batch_size = batch_size 
         self.data_train = data_train
@@ -424,6 +434,7 @@ class SaxiIcoDataModule_fs(pl.LightningDataModule):
         self.num_workers = num_workers
         self.name_class = name_class
         self.freesurfer_path = freesurfer_path
+        self.normalize_features = normalize_features
 
         self.weights = []
         self.df_train = pd.read_csv(self.data_train)
@@ -448,7 +459,7 @@ class SaxiIcoDataModule_fs(pl.LightningDataModule):
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = SaxiIcoDataset_fs(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.train_dataset = SaxiIcoDataset_fs(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path,normalize_features=self.normalize_features,path_to_csv=self.data_train)
         self.val_dataset = SaxiIcoDataset_fs(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.test_dataset = SaxiIcoDataset_fs(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         VL, FL, VFL, FFL,VR, FR, VFR, FFR, Y = self.train_dataset.__getitem__(0)

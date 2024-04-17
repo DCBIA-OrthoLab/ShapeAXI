@@ -127,21 +127,41 @@ def normalize_points(poly, radius):
 def normalize_vector(x):
     return x/np.linalg.norm(x)
 
-def CreateIcosahedron(radius, sl=0):
+def CreateIcosahedron(radius):
     icosahedronsource = vtk.vtkPlatonicSolidSource()
     icosahedronsource.SetSolidTypeToIcosahedron()
     icosahedronsource.Update()
     icosahedron = icosahedronsource.GetOutput()
-    
-    subdivfilter = LinearSubdivisionFilter()
-    subdivfilter.SetInputData(icosahedron)
-    subdivfilter.SetNumberOfSubdivisions(sl)
-    subdivfilter.Update()
-
-    icosahedron = subdivfilter.GetOutput()
     icosahedron = normalize_points(icosahedron, radius)
 
     return icosahedron
+
+def SubdividedIcosahedron(mesh, subdivisions, radius):
+    subdivfilter = LinearSubdivisionFilter()
+    subdivfilter.SetInputData(mesh)
+    subdivfilter.SetNumberOfSubdivisions(subdivisions)
+    subdivfilter.Update()
+    subdivfilter = subdivfilter.GetOutput()
+    subdivfilter = normalize_points(subdivfilter, radius)
+
+    return subdivfilter
+
+def GetPreservedPointIds(original_mesh, subdivided_mesh):
+    point_neighbors = []
+    original_points = original_mesh.GetPoints()
+
+    locator = vtk.vtkOctreePointLocator()
+    locator.SetDataSet(subdivided_mesh)
+    locator.BuildLocator()
+
+    for i in range(original_points.GetNumberOfPoints()):
+        original_point = original_points.GetPoint(i)
+        closest_point_id = locator.FindClosestPoint(original_point)
+        neighbors = GetNeighbors(subdivided_mesh, closest_point_id)
+        neighbors.append(closest_point_id)
+        point_neighbors.append(neighbors)
+
+    return point_neighbors
 
 def CreateSpiral(sphereRadius=4, numberOfSpiralSamples=64, numberOfSpiralTurns=4):
     
@@ -328,6 +348,25 @@ def GetNeighbors(vtkdata, pid):
                 neighbor_pids.append(pid_inner)
 
     return np.unique(neighbor_pids).tolist()
+
+def GetSubdividedNeighbors(original_mesh, subdivided_mesh):
+    # Get the neighbors of each point of the original point in the subdivided mesh
+    point_neighbors = []
+    original_points = original_mesh.GetPoints()
+
+    locator = vtk.vtkOctreePointLocator()
+    locator.SetDataSet(subdivided_mesh)
+    locator.BuildLocator()
+
+    for i in range(original_points.GetNumberOfPoints()):
+        original_point = original_points.GetPoint(i)
+        closest_point_id = locator.FindClosestPoint(original_point)
+        neighbors = GetNeighbors(subdivided_mesh, closest_point_id)
+        neighbors.append(closest_point_id)
+        point_neighbors.append(neighbors)
+
+    return point_neighbors
+
 
 def GetNeighborIds(vtkdata, pid, labels, label, pid_visited):
     cells_id = vtk.vtkIdList()
@@ -668,6 +707,10 @@ def GetColorArray(surf, array_name):
         rgb = (normal*0.5 + 0.5)*255.0
         colored_points.InsertNextTuple3(rgb[0], rgb[1], rgb[2])
     return colored_points
+
+def GetPropertyArray(surf, array_name):
+    property_array = surf.GetPointData().GetArray(array_name)
+    return vtk_to_numpy(property_array)
 
 def GetNormalsActor(surf):
     try:

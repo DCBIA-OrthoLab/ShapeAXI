@@ -61,7 +61,6 @@ def positive_int(value):
         raise argparse.ArgumentTypeError(f"{value} is not a positive float")
     return fvalue
 
-
 def aggregate(ext, args, f, out_prediction_agg):
     if args.csv is not None:
         csv_test = args.csv.replace(ext, '_train_fold{f}_test.csv').format(f=f)
@@ -75,8 +74,6 @@ def aggregate(ext, args, f, out_prediction_agg):
     out_prediction_fn = os.path.join(args.out, 'test', 'fold{f}'.format(f=f), os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
     return out_prediction_fn
-
-
 
 def main(args, arg_groups):
 
@@ -122,10 +119,22 @@ def main(args, arg_groups):
             compute_min_scale_args['mount_point'] = args.mount_point   
             compute_min_scale_args['surf_column'] = args.surf_column
             compute_min_scale_args['out'] = compute_min_scale_args_out
-
             compute_min_scale_args = Namespace(**compute_min_scale_args)
             scale_factor = compute_min_scale.main(compute_min_scale_args)
+
         print(bcolors.SUCCESS, "End computing the scale factor", bcolors.ENDC)
+    
+    elif args.compute_features:
+        print(bcolors.INFO, "Start normalizing features", bcolors.ENDC)
+
+        compute_features_args_out = get_argparse_dict(compute_features.get_argparse())
+        compute_features_args_out['csv'] = args.csv
+        compute_features_args_out['out'] = "/CMF/data/floda"   
+        compute_features_args_out['fs_path'] = args.fs_path
+
+        compute_features_args_out = Namespace(**compute_features_args_out)
+        compute_features.main(compute_features_args_out)
+        print(bcolors.SUCCESS, "End normalizing features", bcolors.ENDC)
 
     else:
         if args.csv is not None:
@@ -256,8 +265,9 @@ def main(args, arg_groups):
                 if saxi_train_args[k]:
                     command.append('--' + str(k))
                     command.append(str(saxi_train_args[k]))
-
-            env = {'CUDA_VISIBLE_DEVICES' : '0'}
+            
+            env = os.environ.copy()  # Copy the current environment variables
+            env['NEPTUNE_API_TOKEN'] = os.environ['NEPTUNE_API_TOKEN']  # Add NEPTUNE_API_TOKEN to the environment for the subprocess
             subprocess.run(command, env=env)
 
         print(bcolors.SUCCESS, "End training for fold {f}".format(f=f), bcolors.ENDC)
@@ -496,9 +506,9 @@ def main(args, arg_groups):
         csv_test = args.csv.replace(ext, '_test.csv')
     else:
         csv_test = args.csv_test
-    saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=best_model_fold))
+    saxi_train_args_out = os.path.join(args.out, 'train', 'fold0')
 
-    print(bcolors.INFO, "Start testing of the best model (fold {f})".format(f=best_model_fold), bcolors.ENDC)
+    print(bcolors.INFO, "Start testing of the best model (fold 0)", bcolors.ENDC)
     best_model_path = get_best_checkpoint(saxi_train_args_out)
     saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
 
@@ -514,7 +524,7 @@ def main(args, arg_groups):
     saxi_predict_args['fdi'] = args.fdi
     saxi_predict_args['fs_path'] = args.fs_path
     saxi_predict_args['device'] = 'cuda:0'
-    saxi_predict_args['out'] = os.path.join(args.out, 'best_test_fold{f}'.format(f=best_model_fold))
+    saxi_predict_args['out'] = os.path.join(args.out, 'best_test_fold0')
 
     saxi_predict_args = Namespace(**saxi_predict_args)
     fname = os.path.basename(csv_test)
@@ -564,7 +574,7 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing'])
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--train_sphere_samples', type=int, help='Number of samples for the training sphere', default=10000)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
@@ -573,13 +583,14 @@ def cml():
     train_group.add_argument('--column_scale_factor', type=str, help='Specify the name if there already is a column with scale factor in the input file', default='surf_scale')
     train_group.add_argument('--profiler', type=str, help='Profiler', default=None)
     train_group.add_argument('--compute_scale_factor', help='Compute a global scale factor for all shapes in the population.', type=int, default=0)
+    train_group.add_argument('--compute_features', help='Compute features for the shapes in the population.', type=int, default=0)
     train_group.add_argument('--mount_point', type=str, help='Dataset mount directory', default="./")
     train_group.add_argument('--num_workers', type=int, help='Number of workers for loading', default=4)
     train_group.add_argument('--base_encoder', type=str, help='Base encoder for the feature extraction', default='resnet18')
-    train_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=4,num_classes=512')
+    train_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512')
     train_group.add_argument('--hidden_dim', type=int, help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', default=512)
-    train_group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.35)    
-    train_group.add_argument('--image_size', type=float, help='Image resolution size', default=256)
+    train_group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.35)
+    train_group.add_argument('--image_size', type=int, help='Image resolution size', default=256)  
     train_group.add_argument('--lr', type=float, help='Learning rate', default=1e-4)
     train_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
     train_group.add_argument('--batch_size', type=int, help='Batch size', default=3)    
@@ -594,6 +605,7 @@ def cml():
     train_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')
     train_group.add_argument('--fs_path', type=str, help='Path to freesurfer folder', default=None)
     train_group.add_argument('--num_images', type=int, help='Number of images to use for the training', default=12)
+    train_group.add_argument('--ico_lvl', type=int, help='Ico level, minimum level is 1 (default: 2)', default=2)
 
 
     # Arguments used for prediction
@@ -620,7 +632,7 @@ def cml():
     args = parser.parse_args()
     
     if not ((args.csv is not None) ^ (args.csv_train is not None and args.csv_test is not None)):
-        parser.error('Either --csv or both --csv_train and --csv_test must be provided, but not both.')
+        parser.error('Either --csv or both --csv_train and --csv_test must be provided, but not --csv, --csv_train and --csv_test.')
 
 
     arg_groups = {}

@@ -221,9 +221,7 @@ class SaxiImageLoggerNeptune_Ico_fs(Callback):
         if batch_idx % self.log_steps == 0:
 
             VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
-
-            batch_size = 3
-            num_images = min(batch_size, self.num_images)
+            num_images = min(VL.shape[1], self.num_images)
 
             VL = VL.to(pl_module.device,non_blocking=True)
             FL = FL.to(pl_module.device,non_blocking=True)
@@ -236,18 +234,11 @@ class SaxiImageLoggerNeptune_Ico_fs(Callback):
 
             with torch.no_grad():
                 # Render the input surface mesh to an image
-                X, PF = pl_module.render(VL[0:1], FL[0:1], VFL[0:1], FFL[0:1], VR[0:1], FR[0:1], VFR[0:1], FFR[0:1])
-
-                grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 0:3, :, :])#Grab the first image, RGB channels only, X, Y. The time dimension is on dim=1
+                XL, PFL = pl_module.render(VL, FL, VFL, FFL)
+                grid_XL = torchvision.utils.make_grid(XL[0, 0:num_images, 0:3, :, :], nrow=3, padding=0)#Grab the first image, RGB channels only, X, Y. The time dimension is on dim=1
                 fig = plt.figure(figsize=(7, 9))
-                ax = plt.imshow(grid_X.permute(1, 2, 0).cpu().numpy())
+                grid_XL = grid_XL.permute(1, 2, 0)
+                ax = plt.imshow(grid_XL.detach().cpu().numpy())
                 trainer.logger.experiment["images/x"].upload(fig)
                 plt.close()
-                
-                grid_X = torchvision.utils.make_grid(X[0, 0:num_images, 3:, :, :])#Grab the depth map. The time dimension is
-                fig = plt.figure(figsize=(7, 9))
-                ax = plt.imshow(grid_X.permute(1, 2, 0).cpu().numpy())
-                trainer.logger.experiment["images/x_depth"].upload(fig)
-                plt.close()
-
 

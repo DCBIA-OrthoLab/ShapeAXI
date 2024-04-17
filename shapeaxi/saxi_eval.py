@@ -337,7 +337,7 @@ def main(args):
     else:        
         df = pd.read_parquet(path_to_csv)
 
-    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs":
+    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs" or args.nn == 'SaxiIcoClassification_fs_CT_Att' or args.nn == 'SaxiIcoClassification_fs_CT_DS' or args.nn == "SaxiIcoClassification_fs_four_Att":
       score = SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
 
     elif args.nn == "SaxiSegmentation":
@@ -361,7 +361,7 @@ def get_argparse():
   parser.add_argument('--class_column', type=str, help='Which column to do the stats on', default='class')
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs'])
+  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiIcoClassification_fs_CT_Att', 'SaxiIcoClassification_fs_CT_DS', "SaxiIcoClassification_fs_four_Att"])
   parser.add_argument('--title', type=str, help='Title for the image', default='Confusion matrix')
   parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')

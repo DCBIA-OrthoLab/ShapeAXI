@@ -23,6 +23,7 @@ from . import saxi_nets
 from .saxi_nets import MonaiUNet, SaxiIcoClassification
 from .saxi_logger import SaxiImageLoggerTensorboard, SaxiImageLoggerTensorboardSegmentation, SaxiImageLoggerTensorboardIco, SaxiImageLoggerTensorboardIco_fs, SaxiImageLoggerNeptune, SaxiImageLoggerNeptune_Ico_fs
 
+
 def logger_neptune_tensorboard(args):
     image_logger = None
     logger = None
@@ -55,7 +56,7 @@ def logger_neptune_tensorboard(args):
 def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback):
 
     #Creation of Dataset
-    brain_data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,model = args.nn,surf_column = args.surf_column,class_column = args.class_column,train_transform = TrainTransform(scale_factor=args.scale_factor),valid_transform = EvalTransform(scale_factor=args.scale_factor),test_transform = EvalTransform(scale_factor=args.scale_factor))
+    brain_data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,model = args.nn,surf_column = args.surf_column,class_column = args.class_column, train_transform = TrainTransform(scale_factor=args.scale_factor),valid_transform = EvalTransform(scale_factor=args.scale_factor),test_transform = EvalTransform(scale_factor=args.scale_factor))
 
     saxi_args = vars(args)
     if args.nn == "SaxiClassification":
@@ -81,17 +82,16 @@ def SaxiClassification_SaxiRegression_train(args, checkpoint_callback, mount_poi
     trainer.fit(model, datamodule=brain_data, ckpt_path=args.model)
 
 
-def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, logger, early_stop_callback):
+def SaxiSegmentation_train(args, checkpoint_callback, mount_point, df_train, df_val, df_test, early_stop_callback):
 
     #Creation of Dataset
     brain_data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,model = args.nn,surf_column = 'surf',surf_property = 'UniversalID',train_transform = UnitSurfTransform(),valid_transform = UnitSurfTransform(),test_transform = UnitSurfTransform())
-    #train_transform = RandomRemoveTeethTransform(surf_property="UniversalID", random_rotation=True),
 
     # model = MonaiUNet(args, out_channels = 34, class_weights=None, image_size=320, train_sphere_samples=args.train_sphere_samples)
 
 
     # CHECK THISSSSS :
-
+    saxi_args = vars(args)
     SAXINETS = getattr(saxi_nets, args.nn)
     model = SAXINETS(**saxi_args)
 
@@ -180,28 +180,48 @@ def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train
     list_val_and_test_transform.append(CenterTransform())
     list_val_and_test_transform.append(NormalizePointTransform())
     val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
+   
+    #Creation of Dataset
+    brain_data = SaxiIcoDataModule_fs(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path,normalize_features=True)
+    df_train = pd.read_csv(train)
+    unique_classes = np.sort(np.unique(df_train[args.class_column]))
+    nb_classes = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
 
-    # df_train = pd.read_csv("/work/floda/source/qc_filtered.csv")
-    # brain_data = SaxiIcoDataset_fs(df_train,transform=train_transform,name_class = args.class_column,freesurfer_path=args.fs_path)
+    print('Number of classes:',len(nb_classes))
 
-    # for i in range(len(brain_data)):
-    #     try:
-    #         sample = brain_data[i]
-    #         print(i)
-    #     except Exception as e:
-    #         print(f"Path or CSV input line: {brain_data.df.iloc[i]}")
-    
-    # df_train = "/work/floda/source/qc_filtered.csv"
-    # brain_data = SaxiIcoDataModule_fs(args.batch_size,df_train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
+    saxi_args = vars(args)
+    saxi_args['out_classes'] = len(nb_classes)
+    saxi_args['out_size'] = 256
 
-    # for i, batch in enumerate(brain_data.train_dataloader()):
-    #     try:
-    #         print(f"Processing batch {i+2}")
-    #     except RuntimeError as e:
-    #         print(f"RuntimeError encountered at batch {i+1}: {e}")
-    #         break
+    #Creation of our model
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS(**saxi_args)
 
-    
+    callbacks = [early_stop_callback, checkpoint_callback]
+    logger, image_logger = logger_neptune_tensorboard(args)
+
+    if image_logger:
+        callbacks.append(image_logger)
+
+    trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
+    trainer.fit(model,datamodule=brain_data)
+
+
+def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
+    #Transformation
+    list_train_transform = [] 
+    list_train_transform.append(CenterTransform())
+    list_train_transform.append(NormalizePointTransform())
+    list_train_transform.append(RandomRotationTransform())        
+    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) #Do not use this transformation if your object is not a sphere
+    list_train_transform.append(NormalizePointTransform()) #Do not use this transformation if your object is not a sphere
+    train_transform = monai.transforms.Compose(list_train_transform)
+
+    list_val_and_test_transform = []    
+    list_val_and_test_transform.append(CenterTransform())
+    list_val_and_test_transform.append(NormalizePointTransform())
+    val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
+   
     #Creation of Dataset
     brain_data = SaxiIcoDataModule_fs(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
     df_train = pd.read_csv(train)
@@ -224,9 +244,9 @@ def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train
     if image_logger:
         callbacks.append(image_logger)
 
-    # trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu")
     trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
     trainer.fit(model,datamodule=brain_data)
+
 
 
 def main(args):
@@ -264,10 +284,12 @@ def main(args):
 
     elif args.nn == "SaxiIcoClassification_fs":
         SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
+    
+    elif args.nn == "SaxiRing":
+        SaxiRing_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
 
     else:
         raise ValueError ("Unknown neural network name: {}, choose between SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification".format(args.nn))
-
 
 
 def get_argparse():
@@ -293,13 +315,13 @@ def get_argparse():
 
     ##Hyperparameters
     hyper_group = parser.add_argument_group('Hyperparameters')
-    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs"])
+    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", "SaxiRing"])
     hyper_group.add_argument('--base_encoder', type=str, help='Base encoder for the feature extraction', default='resnet18')
-    hyper_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=4,num_classes=512')
+    hyper_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512')
     hyper_group.add_argument('--hidden_dim', type=int, help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', default=512)
-    hyper_group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.35)    
+    hyper_group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.35)  #1.35   
     hyper_group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=1)
-    hyper_group.add_argument('--image_size', type=int, help='Image resolution size', default=256)
+    hyper_group.add_argument('--image_size', type=int, help='Image resolution size', default=256)  #256
     hyper_group.add_argument('--lr', type=float, help='Learning rate', default=1e-4,)
     hyper_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
     hyper_group.add_argument('--batch_size', type=int, help='Batch size', default=3)    

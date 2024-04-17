@@ -26,7 +26,6 @@ from io import BytesIO
 import json
 import os
 
-
 from . import utils
 from .IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
 from .saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, SelfAttention, Identity, TimeDistributed
@@ -80,16 +79,17 @@ class TimeDistributed(nn.Module):
 
 class SelfAttention(nn.Module):
     # Self attention layer
-    def __init__(self, in_units, out_units):
+    def __init__(self, in_units, out_units, dim=1):
         super().__init__()
         self.W1 = nn.Linear(in_units, out_units)
         self.V = nn.Linear(out_units, 1)
+        self.dim = dim
 
     def forward(self, query, values):        
         score = nn.Sigmoid()(self.V(nn.Tanh()(self.W1(query))))
-        attention_weights = score/torch.sum(score, dim=1,keepdim=True)
+        attention_weights = score/torch.sum(score, dim=self.dim,keepdim=True)
         context_vector = attention_weights * values
-        context_vector = torch.sum(context_vector, dim=1)
+        context_vector = torch.sum(context_vector, dim=self.dim)
         return context_vector, score
 
 
@@ -803,7 +803,9 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         self.y_pred = []
         self.y_true = []
 
-        ico_sphere = utils.CreateIcosahedron(self.hparams.radius, self.hparams.ico_lvl)
+        icosahedron = utils.CreateIcosahedron(self.hparams.radius)
+        # ico_sphere = utils.SubdividedIcosahedron(icosahedron, self.hparams.subdivision_level, self.hparams.radius)
+        ico_sphere = utils.SubdividedIcosahedron(icosahedron, 2, self.hparams.radius)
         ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
         self.ico_sphere_verts = ico_sphere_verts
         self.ico_sphere_edges = ico_sphere_edges
@@ -852,8 +854,8 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         lights = AmbientLights()
         rasterizer = MeshRasterizer(cameras=self.hparams.cameras,raster_settings=raster_settings)
 
-        self.hparams.phong_renderer = MeshRendererWithFragments(rasterizer=rasterizer,shader=HardPhongShader(cameras=self.hparams.cameras, lights=lights))        
-    
+        self.hparams.phong_renderer = MeshRendererWithFragments(rasterizer=rasterizer,shader=HardPhongShader(cameras=self.hparams.cameras, lights=lights))
+
     def to(self, device=None):
         # Move the renderer to the specified device
         self.hparams.phong_renderer = self.hparams.phong_renderer.to(device)
@@ -870,29 +872,16 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         else:
             raise "{base_encoder} not in monai networks or torchvision".format(base_encoder=self.hparams.base_encoder)
 
+        model_params = 'pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512'
         model_params = eval('dict(%s)' % self.hparams.base_encoder_params.replace(' ',''))
         
         self.convnet = template_model(**model_params)
         setattr(self, f'TimeDistributed{side}', TimeDistributed(self.convnet))
 
-        if self.hparams.layer == 'Att':
-            setattr(self, f'WV{side}', nn.Linear(self.hparams.hidden_dim, out_size))
-            setattr(self, f'Attention{side}', SelfAttention(self.hparams.hidden_dim, out_size))
-
-        elif self.hparams.layer in {'IcoConv2D', 'IcoConv1D', 'IcoLinear'}:
-            if self.hparams.layer == 'IcoConv2D':
-                conv_layer = nn.Conv2d(self.hparams.hidden_dim, out_size, kernel_size=(3, 3), stride=2, padding=0)
-            elif self.hparams.layer == 'IcoConv1D':
-                conv_layer = nn.Conv1d(self.hparams.hidden_dim, out_size, 7)
-            else:
-                conv_layer = nn.Linear(self.hparams.hidden_dim * 7, out_size)
-            icosahedron = IcosahedronConv2d(conv_layer, self.ico_sphere_verts, self.ico_sphere_edges)
-            avgpool = AvgPoolImages(nbr_images=self.nbr_cam)
-            setattr(self, f'IcosahedronConv2d{side}', icosahedron)
-            setattr(self, f'pooling{side}', avgpool)
-
-        else:
-            raise f"{self.hparams.layer} not in IcoConv2D, IcoConv1D, or IcoLinear"
+        icosahedron = IcosahedronConv2d(conv_layer, self.ico_sphere_verts, self.ico_sphere_edges)
+        avgpool = AvgPoolImages(nbr_images=self.nbr_cam)
+        setattr(self, f'IcosahedronConv2d{side}', icosahedron)
+        setattr(self, f'pooling{side}', avgpool)
 
 
     def configure_optimizers(self):
@@ -924,7 +913,7 @@ class SaxiIcoClassification_fs(pl.LightningModule):
 
 
     def get_features(self,V,F,VF,FF,side):
-        x, PF = self.render(V,F,VF,FF)   
+        x, PF = self.render(V,F,VF,FF)  
         x = getattr(self, f'TimeDistributed{side}')(x)
         x = getattr(self, f'IcosahedronConv2d{side}')(x)
         x = getattr(self, f'pooling{side}')(x) 
@@ -1176,14 +1165,14 @@ class DentalModelSeg(pl.LightningModule):
 
         model = self.create_unet_model()
 
-        if custom_model is not None:
-            # Use the provided custom model
-            custom_model = self.dental_model_seg_args(model)
-            self.model = TimeDistributed(custom_model)
-        else:
-            # Use the default UNet model
+        if custom_model is None:
+             # Use the default UNet model
             model_loaded = self.dental_model_seg(model)
             self.model = TimeDistributed(model_loaded)
+        else:
+            # Use the provided custom model
+            self.custom_model = self.dental_model_seg_args(model)
+            self.model = TimeDistributed(self.custom_model)
         
 
         ico_verts, ico_faces, ico_edges = utils.PolyDataToTensors(utils.CreateIcosahedron(radius=radius, sl=subdivision_level))
@@ -1282,5 +1271,281 @@ class DentalModelSeg(pl.LightningModule):
         pass
 
 
+###################################################################   DOWN BLOCK TEST  ##################################################################################################################
 
 
+class AttentionRing(nn.Module):
+    def __init__(self, in_units, out_units, neigh_orders):
+        super().__init__()
+        # neigh_order: (Nviews previous level, Neighbors next level)
+        self.neigh_orders = neigh_orders
+        self.Att = SelfAttention(in_units, out_units, dim=2)
+
+    def forward(self, query, values):
+        # Apply attention to the input sequence
+        # query: (batch, views, features)
+        # values: (batch, views, features)
+
+        #Some neighbours are 7 and some are 6 so we repeat the first one to reach 7
+        for data in self.neigh_orders:
+            if len(data) == 6:
+                repeat_neighbor = data[0]
+                data.append(repeat_neighbor)
+        
+        query = query[:, self.neigh_orders] # (batch, Nv_{n-1}, Idx_{n}, features)
+        values = values[:, self.neigh_orders] # (batch, Nv_{n-1}, Idx_{n}, features)
+
+        context_vector, score = self.Att(query, values)
+
+        return context_vector, score
+
+
+class AttentionRings(nn.Module):
+    def __init__(self, in_units, out_v_units, out_q_units, neigh_orders):
+        super(AttentionRings, self).__init__()
+
+        self.Q = nn.Linear(in_units, out_q_units)
+        self.Att = AttentionRing(in_units, out_v_units, neigh_orders)
+        
+
+    def forward(self, x):
+        query = self.Q(x)
+        context_vector, score = self.Att(query, x)
+        return context_vector, score
+
+
+
+class SaxiRing(pl.LightningModule):
+    def __init__(self, **kwargs):
+        super(SaxiRing, self).__init__()
+        self.save_hyperparameters()
+        self.y_pred = []
+        self.y_true = []
+
+        # Create the icosahedrons form each level
+        ico_12 = utils.CreateIcosahedron(self.hparams.radius) # 12 vertices
+        ico_42 = utils.SubdividedIcosahedron(ico_12,2,self.hparams.radius) # 42 vertices
+        ico_162 = utils.SubdividedIcosahedron(ico_42,2,self.hparams.radius) # 162 vertices
+
+        #Get the neighbors to go form level N to level N-1
+        ring_neighs_42 = utils.GetPreservedPointIds(ico_12,ico_42)
+        ring_neighs_162 = utils.GetPreservedPointIds(ico_42,ico_162)
+
+        #Create the down blocks to go from 162 -> 42 -> 12
+        self.down1 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, ring_neighs_162)
+        self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, ring_neighs_42)
+
+        ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(ico_162)
+
+        self.ico_sphere_verts = ico_sphere_verts
+        self.ico_sphere_edges = ico_sphere_edges
+
+        R=[]
+        T=[]
+        for coords_cam in self.ico_sphere_verts.tolist():
+            camera_position = torch.FloatTensor([coords_cam])
+            R_current = look_at_rotation(camera_position)
+            # check if camera coords vector and up vector for R are collinear
+            if torch.equal(torch.cross(camera_position,torch.tensor([[0.,1.,0.]])),torch.tensor([[0., 0., 0.]])):
+               R_current = look_at_rotation(camera_position, up = torch.tensor([[0.0, 0.0, 1.0]]),)
+            T_current = -torch.bmm(R_current.transpose(1, 2), camera_position[:,:,None])[:, :, 0]   # (1, 3)
+
+            R.append(R_current)
+            T.append(T_current)
+
+        self.R=torch.cat(R)
+        self.T=torch.cat(T)
+        self.nbr_cam = len(self.R)
+
+        self.drop = nn.Dropout(p=self.hparams.dropout_lvl)
+
+        # Left path
+        self.create_network('L', self.hparams.out_size)
+        # Right path
+        self.create_network('R', self.hparams.out_size)
+
+        #Loss
+        self.loss_train = nn.CrossEntropyLoss()
+        self.loss_val = nn.CrossEntropyLoss()
+        self.loss_test = nn.CrossEntropyLoss()
+
+        #Pooling layer
+        # self.Pooling = AvgPoolImages(nbr_images=12)
+        self.W = nn.Linear(self.hparams.hidden_dim, self.hparams.out_size)
+        # self.Att = SelfAttention(self.hparams.hidden_dim, out_size))
+        self.Att = SelfAttention(self.hparams.hidden_dim, self.hparams.out_size, dim=2)
+
+        
+        #Final layer
+        self.Classification = nn.Linear(2*ico_12.GetNumberOfPoints(), 2)
+
+        #Accuracy
+        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
+        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
+        
+        # Initialize a perspective camera.
+        self.hparams.cameras = FoVPerspectiveCameras()
+
+        # We will also create a Phong renderer. This is simpler and only needs to render one face per pixel.
+        raster_settings = RasterizationSettings(image_size=self.hparams.image_size,blur_radius=0,faces_per_pixel=1,max_faces_per_bin=100000)
+
+        lights = AmbientLights()
+        rasterizer = MeshRasterizer(cameras=self.hparams.cameras,raster_settings=raster_settings)
+
+        self.hparams.phong_renderer = MeshRendererWithFragments(rasterizer=rasterizer,shader=HardPhongShader(cameras=self.hparams.cameras, lights=lights))
+
+
+    def to(self, device=None):
+        # Move the renderer to the specified device
+        self.hparams.phong_renderer = self.hparams.phong_renderer.to(device)
+        return super().to(device)
+
+    
+    def create_network(self, side, out_size):
+        # Create an icosphere
+        if hasattr(monai.networks.nets, self.hparams.base_encoder):
+            template_model = getattr(monai.networks.nets, self.hparams.base_encoder)
+        elif hasattr(torchvision.models, self.hparams.base_encoder):
+            template_model = getattr(torchvision.models, self.hparams.base_encoder)
+        else:
+            raise "{base_encoder} not in monai networks or torchvision".format(base_encoder=self.hparams.base_encoder)
+
+        model_params = eval('dict(%s)' % self.hparams.base_encoder_params.replace(' ',''))
+        
+        self.convnet = template_model(**model_params)
+        setattr(self, f'TimeDistributed{side}', TimeDistributed(self.convnet))
+
+
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        return optimizer
+
+    def forward(self, x):
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR = x
+        VL = VL.to(self.device,non_blocking=True)
+        FL = FL.to(self.device,non_blocking=True)
+        VFL = VFL.to(self.device,non_blocking=True)
+        FFL = FFL.to(self.device,non_blocking=True)
+        VR = VR.to(self.device,non_blocking=True)
+        FR = FR.to(self.device,non_blocking=True)
+        VFR = VFR.to(self.device,non_blocking=True)
+        FFR = FFR.to(self.device,non_blocking=True)
+        # TimeDistributed
+        xL = self.get_features(VL,FL,VFL,FFL,'L')
+        xR = self.get_features(VR,FR,VFR,FFR,'R')
+        # Permute the number of views and number of features to be able to use downblock
+        xL, scoreL = self.down1(xL)
+        xL, scoreL = self.down2(xL)
+        xR, scoreR = self.down1(xR)
+        xR, scoreR = self.down2(xR)
+        # Add attention layer
+        valuesL = self.W(xL)
+        valuesR = self.W(xR)
+        xL, score = self.Att(xL,valuesL)
+        xR, score = self.Att(xR,valuesR)
+        l_left_right = [xL,xR]
+        x = torch.cat(l_left_right,dim=1)
+        # Last classification layer
+        x = self.drop(x)
+        x = self.Classification(x)
+
+        return x
+
+
+    def get_features(self,V,F,VF,FF,side):
+        x, PF = self.render(V,F,VF,FF)  
+        x = getattr(self, f'TimeDistributed{side}')(x)
+
+
+        return x
+
+
+    def render(self,V,F,VF,FF):
+        textures = TexturesVertex(verts_features=VF[:, :, :3])
+        meshes = Meshes(
+            verts=V,
+            faces=F,
+            textures=textures
+        )
+        PF = []
+        for i in range(self.nbr_cam):
+            pix_to_face = self.GetView(meshes,i)
+            PF.append(pix_to_face.unsqueeze(dim=1))
+        PF = torch.cat(PF, dim=1)
+
+        l_features = []
+        for index in range(FF.shape[-1]):
+            l_features.append(torch.take(FF[:,index],PF)*(PF >= 0)) # take each feature for each pictures
+        x = torch.cat(l_features,dim=2)
+
+        return x, PF
+
+
+    def training_step(self, train_batch, batch_idx):
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = train_batch
+        x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
+        loss = self.loss_train(x,Y)
+        self.log('train_loss', loss) 
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        self.train_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
+
+        return loss
+
+
+    def validation_step(self,val_batch,batch_idx):
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = val_batch
+        x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
+        loss = self.loss_val(x,Y)
+        self.log('val_loss', loss)
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
+
+        return val_acc
+
+
+    def test_step(self,test_batch,batch_idx):
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
+        x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
+        loss = self.loss_test(x,Y)
+        self.log('test_loss', loss, batch_size=self.hparams.batch_size)
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        output = [predictions,Y]
+
+        return output
+
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+        target_names = ['No QC','QC']
+        self.y_pred = y_pred
+        self.y_true = y_true
+        #Classification report
+        print(self.y_pred)
+        print(self.y_true)
+        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+
+
+    def GetView(self,meshes,index):
+        phong_renderer = self.hparams.phong_renderer.to(self.device)
+        R = self.R[index][None].to(self.device)
+        T = self.T[index][None].to(self.device)
+        _, fragments = phong_renderer(meshes.clone(),R=R,T=T)
+        pix_to_face = fragments.pix_to_face
+        pix_to_face = pix_to_face.permute(0,3,1,2)
+
+        return pix_to_face
+
+
+    def get_y_for_report_classification(self):
+        #This function could be called only after test step was done
+        return (self.y_pred,self.hparams.y_true)
+    
+
+    def Is_it_Icolayer(self,layer):
+        return (layer[:3] == 'Ico')

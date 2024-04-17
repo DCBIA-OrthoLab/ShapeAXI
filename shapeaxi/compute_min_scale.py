@@ -36,6 +36,7 @@ def main(args):
         df.to_csv(args.out, index=False)
 
     print("MinScale:", min_scale)
+    
     return min_scale
 
 def get_argparse():
@@ -43,7 +44,7 @@ def get_argparse():
     parser = argparse.ArgumentParser(description='Computes the minimum magnitude/scaling factor for all shapes after centering each at 0.')
     parser.add_argument('--csv', type=str, help='CSV file with column surf', required=True)
     parser.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
-    parser.add_argument('--out', type=str, help='Output json filename', default=None)
+    parser.add_argument('--out', type=str, help='Output csv filename', default=None)
     parser.add_argument('--mount_point', type=str, help='Mount point', default="./")
     return parser
 

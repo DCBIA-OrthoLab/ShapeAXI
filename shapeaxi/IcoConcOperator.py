@@ -98,6 +98,7 @@ class IcosahedronConv2d(nn.Module):
 
         return output
 
+
 class IcosahedronConv1d(nn.Module):
     def __init__(self,module,verts,list_edges):
         super().__init__()
