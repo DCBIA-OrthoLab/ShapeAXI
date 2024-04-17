@@ -1,2 +1,0 @@
---find-links=https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu117_pyt201/download.html
-pytorch3d==0.7.4

@@ -8,19 +8,19 @@ import pandas as pd
 from multiprocessing import Pool, cpu_count
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
-
 import torch
 import monai
 from monai.transforms import (
     ToTensor
 )
 
+random_table = {0: [0.20609576603761093, 0.049483664108669334, 0.12125618974900243], 1: [0.8226083537896619, 0.4351012583759224, 0.9832181474162848], 2: [0.7816089005179315, 0.10346579724552551, 0.23487367424552041], 3: [0.025519074513923767, 0.3171905857331965, 0.15567817079277158], 4: [0.6663883241545112, 0.6000648624913231, 0.37658036275159334], 5: [0.8776899967271671, 0.7616932316027937, 0.7829308539989045], 6: [0.898071921630757, 0.551591502770238, 0.821443825353693], 7: [0.2151654905680822, 0.6862729312525537, 0.6138162023396329], 8: [0.3045080015195074, 0.18899392802023163, 0.40911076426399806], 9: [0.11765999434984209, 0.6975068194921006, 0.7879352132497024], 10: [0.7008483630188418, 0.29605323524580973, 0.8198879200426741], 11: [0.37520055941188546, 0.8341404734565594, 0.26177124408355934], 12: [0.3934631970864203, 0.623997372518547, 0.6436244132804986], 13: [0.4448759237168636, 0.20539400268295127, 0.13780334209661682], 14: [0.1512125043260758, 0.8497980664920212, 0.9668755390459113], 15: [0.4226479922022087, 0.6474852944643369, 0.8416756096111622], 16: [0.3433546138380138, 0.4753996230412757, 0.9250164530083743], 17: [0.3568056105452764, 0.18334522038240408, 0.5530289655651638], 18: [0.20720530535494464, 0.30149437038255333, 0.8620008177802112], 19: [0.5064194091445487, 0.371008925644291, 0.7615128573103098], 20: [0.8113590149155854, 0.991276799639109, 0.4678565663944516], 21: [0.3918520636479679, 0.4516887244764669, 0.10207228081624953], 22: [0.08985831157936286, 0.7697455049664752, 0.1074750433948709], 23: [0.14858286085833028, 0.4702633232662803, 0.8486448165595275], 24: [0.8841279840560545, 0.4172026503952089, 0.8533483665140427], 25: [0.7068243612992762, 0.6953362178559506, 0.8568301873334966], 26: [0.49107423909005066, 0.29355390600500664, 0.7047031635033804], 27: [0.8420869188007641, 0.09722208762577988, 0.5679188126651894], 28: [0.7048997343179865, 0.5842467928067391, 0.3599437108217626], 29: [0.031132795477680664, 0.47856137471759597, 0.7714699856897599], 30: [0.7534987166987384, 0.10452057614858501, 0.5444979823604356], 31: [0.7474303156543861, 0.7925880784420662, 0.3604102361881435], 32: [0.8628363999159102, 0.21101681904692737, 0.9013222342779957], 33: [0.629879190497666, 0.984613775038266, 0.19913181707246874], 34: [0.5658644598064076, 0.2802941241818787, 0.7731639034323629], 35: [0.7161432827471007, 0.07320876761101225, 0.8036390200148513], 36: [0.7652556867768864, 0.29238753434799825, 0.9531094559385218], 37: [0.15696680412837793, 0.3931011713942679, 0.4243212240743779], 38: [0.42187683148471333, 0.18912842290221588, 0.6819018502705237], 39: [0.4442228218708715, 0.5778909523966065, 0.9642724982954931], 40: [0.9758068203300386, 0.05027079482550001, 0.2650237477395715], 41: [0.08943656541981004, 0.13753428811570412, 0.5603078234439788], 42: [0.010201621306042186, 0.327628786871763, 0.3890688609399522], 43: [0.8210302259754378, 0.6115200256108921, 0.15031238781810718], 44: [0.7001777727283601, 0.3645027551754205, 0.07376451995446232], 45: [0.9698531436998832, 0.751003571749085, 0.5743430137745764], 46: [0.468449857802292, 0.7595685633637632, 0.053443953365929664], 47: [0.7004671870884197, 0.1500730383346197, 0.3643145018601389], 48: [0.5450051853727357, 0.20296281917381587, 0.6905551030638406], 49: [0.25030733321324905, 0.5641932299258015, 0.8330475173454799], 50: [0.09985199678325007, 0.05718411388275524, 0.04637388264853759], 51: [0.46781693913408406, 0.4601588232568161, 0.5980582562940925], 52: [0.6530110537697219, 0.024486312086407724, 0.1202412863786424], 53: [0.3118463907417399, 0.2189245452784624, 0.0023464268741028027], 54: [0.8241142867493606, 0.0926370028968565, 0.1972737972668107], 55: [0.20008926867870458, 0.2724840513608894, 0.24981531935472734], 56: [0.8502674870599242, 0.3921126629717022, 0.6819512401878478], 57: [0.5302783999655287, 0.8505255934951383, 0.49144132387275363], 58: [0.5115899748202699, 0.9350860104306851, 0.32636803398265724], 59: [0.21445563074258867, 0.5014534480264361, 0.6877952670334156]}
+
 class LinearSubdivisionFilter:
 
     InputData = None
     Output = None
     NumberOfSubdivisions = 1
-
 
     def SetInputData(self, polydata):
         self.InputData = polydata
@@ -127,21 +127,41 @@ def normalize_points(poly, radius):
 def normalize_vector(x):
     return x/np.linalg.norm(x)
 
-def CreateIcosahedron(radius, sl=0):
+def CreateIcosahedron(radius):
     icosahedronsource = vtk.vtkPlatonicSolidSource()
     icosahedronsource.SetSolidTypeToIcosahedron()
     icosahedronsource.Update()
     icosahedron = icosahedronsource.GetOutput()
-    
-    subdivfilter = LinearSubdivisionFilter()
-    subdivfilter.SetInputData(icosahedron)
-    subdivfilter.SetNumberOfSubdivisions(sl)
-    subdivfilter.Update()
-
-    icosahedron = subdivfilter.GetOutput()
     icosahedron = normalize_points(icosahedron, radius)
 
     return icosahedron
+
+def SubdividedIcosahedron(mesh, subdivisions, radius):
+    subdivfilter = LinearSubdivisionFilter()
+    subdivfilter.SetInputData(mesh)
+    subdivfilter.SetNumberOfSubdivisions(subdivisions)
+    subdivfilter.Update()
+    subdivfilter = subdivfilter.GetOutput()
+    subdivfilter = normalize_points(subdivfilter, radius)
+
+    return subdivfilter
+
+def GetPreservedPointIds(original_mesh, subdivided_mesh):
+    point_neighbors = []
+    original_points = original_mesh.GetPoints()
+
+    locator = vtk.vtkOctreePointLocator()
+    locator.SetDataSet(subdivided_mesh)
+    locator.BuildLocator()
+
+    for i in range(original_points.GetNumberOfPoints()):
+        original_point = original_points.GetPoint(i)
+        closest_point_id = locator.FindClosestPoint(original_point)
+        neighbors = GetNeighbors(subdivided_mesh, closest_point_id)
+        neighbors.append(closest_point_id)
+        point_neighbors.append(neighbors)
+
+    return point_neighbors
 
 def CreateSpiral(sphereRadius=4, numberOfSpiralSamples=64, numberOfSpiralTurns=4):
     
@@ -203,6 +223,7 @@ def CreatePlane(Origin,Point1,Point2,Resolution):
     plane.Update()
     return plane.GetOutput()
 
+
 def ReadSurf(fileName):
 
     fname, extension = os.path.splitext(fileName)
@@ -261,6 +282,7 @@ def ReadSurf(fileName):
             reader.Update()
             surf = reader.GetOutput()
     elif extension == '.gii':
+
         import nibabel as nib
         from fsl.data import gifti
 
@@ -285,7 +307,9 @@ def ReadSurf(fileName):
         surf = vtk.vtkPolyData()
         surf.SetPoints(points)
         surf.SetPolys(cells)
-
+    else:
+        raise Exception("File format not supported")
+    
     return surf
 
 def WriteSurf(surf, fileName, use_binary=False):
@@ -324,6 +348,25 @@ def GetNeighbors(vtkdata, pid):
                 neighbor_pids.append(pid_inner)
 
     return np.unique(neighbor_pids).tolist()
+
+def GetSubdividedNeighbors(original_mesh, subdivided_mesh):
+    # Get the neighbors of each point of the original point in the subdivided mesh
+    point_neighbors = []
+    original_points = original_mesh.GetPoints()
+
+    locator = vtk.vtkOctreePointLocator()
+    locator.SetDataSet(subdivided_mesh)
+    locator.BuildLocator()
+
+    for i in range(original_points.GetNumberOfPoints()):
+        original_point = original_points.GetPoint(i)
+        closest_point_id = locator.FindClosestPoint(original_point)
+        neighbors = GetNeighbors(subdivided_mesh, closest_point_id)
+        neighbors.append(closest_point_id)
+        point_neighbors.append(neighbors)
+
+    return point_neighbors
+
 
 def GetNeighborIds(vtkdata, pid, labels, label, pid_visited):
     cells_id = vtk.vtkIdList()
@@ -384,6 +427,30 @@ def ScaleSurf(surf, mean_arr = None, scale_factor = None, copy=True):
 
     return surf, mean_arr, scale_factor
 
+
+def ScaleSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
+    if copy:
+        # Perform a deep copy if needed (create a new tensor with the same data)
+        surf = surf.clone()
+
+    if mean_arr is None:
+        mean_arr = surf.mean(dim=0)
+    
+    bounds_max_arr = surf.max(dim=0)[0]
+
+    # Centering points of the shape
+    surf = surf - mean_arr
+
+    # Computing scale factor if it is not provided
+    if scale_factor is None:
+        scale_factor = 1.0 / (bounds_max_arr - mean_arr).norm()
+
+    # Scale points of the shape by scale factor
+    surf = surf * scale_factor
+
+    return surf, mean_arr, scale_factor
+
+
 def GetActor(surf):
     surfMapper = vtk.vtkPolyDataMapper()
     surfMapper.SetInputData(surf)
@@ -391,8 +458,8 @@ def GetActor(surf):
     surfActor = vtk.vtkActor()
     surfActor.SetMapper(surfMapper)
 
-
     return surfActor
+    
 def GetTransform(rotationAngle, rotationVector):
     transform = vtk.vtkTransform()
     transform.RotateWXYZ(rotationAngle, rotationVector[0], rotationVector[1], rotationVector[2])
@@ -401,6 +468,10 @@ def GetTransform(rotationAngle, rotationVector):
 def RotateSurf(surf, rotationAngle, rotationVector):
     transform = GetTransform(rotationAngle, rotationVector)
     return RotateTransform(surf, transform)
+
+def RotateSurfT(surf, rotation_matrix):
+    surf_rotated = torch.matmul(surf.double(), rotation_matrix) 
+    return surf_rotated
 
 def RotateInverse(surf, rotationAngle, rotationVector):
     transform = vtk.vtkTransform()
@@ -427,15 +498,51 @@ def RotateNpTransform(surf, angle, np_transform):
     rotationVector = np_tran
     return RotateInverse(surf, rotationAngle, rotationVector)
 
+def is_vtk_file(filename):
+    if filename.lower().endswith(".vtk"):
+        return True
+
 def RandomRotation(surf):
     rotationAngle = np.random.random()*360.0
     rotationVector = np.random.random(3)*2.0 - 1.0
     rotationVector = rotationVector/np.linalg.norm(rotationVector)
     return RotateSurf(surf, rotationAngle, rotationVector), rotationAngle, rotationVector
 
+def RandomRotationT(surf):
+    rotationAngle = torch.tensor(np.random.random() * 360.0, dtype=torch.double) 
+    rotationVector = torch.tensor(np.random.random(3) * 2.0 - 1.0, dtype=torch.double)
+    rotationVector = rotationVector / torch.norm(rotationVector)
+
+    rotation_matrix = GetRotationMatrixT(rotationAngle, rotationVector)
+    surf_rotated = RotateSurfT(surf, rotation_matrix)
+
+    return surf_rotated
+
+def GetRotationMatrixT(rotationAngle, rotationVector):
+    axis_x = rotationVector[0]
+    axis_y = rotationVector[1]
+    axis_z = rotationVector[2]
+
+    radians = torch.deg2rad(rotationAngle)
+    cos_theta = torch.cos(radians)
+    sin_theta = torch.sin(radians)
+    complement_cos_theta = 1.0 - cos_theta
+
+    rotation_matrix = torch.tensor([
+        [cos_theta + axis_x * axis_x * complement_cos_theta, axis_x * axis_y * complement_cos_theta - axis_z * sin_theta, axis_x * axis_z * complement_cos_theta + axis_y * sin_theta],
+        [axis_y * axis_x * complement_cos_theta + axis_z * sin_theta, cos_theta + axis_y * axis_y * complement_cos_theta, axis_y * axis_z * complement_cos_theta - axis_x * sin_theta],
+        [axis_z * axis_x * complement_cos_theta - axis_y * sin_theta, axis_z * axis_y * complement_cos_theta + axis_x * sin_theta, cos_theta + axis_z * axis_z * complement_cos_theta]
+    ], dtype=torch.double)
+
+    return rotation_matrix
+
 def GetUnitSurf(surf, mean_arr = None, scale_factor = None, copy=True):
-  unit_surf, surf_mean, surf_scale = ScaleSurf(surf, mean_arr, scale_factor, copy)
-  return unit_surf
+    unit_surf, surf_mean, surf_scale = ScaleSurf(surf, mean_arr, scale_factor, copy)
+    return unit_surf
+
+def GetUnitSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
+    unit_surf, surf_mean, surf_scale = ScaleSurfT(surf, mean_arr, scale_factor, copy)
+    return unit_surf
 
 def GetColoredActor(surf, property_name, range_scalars = None):
 
@@ -461,12 +568,10 @@ def GetColoredActor(surf, property_name, range_scalars = None):
 
     return actor
 
-
 def GetRandomColoredActor(surf, property_name, range_scalars = [0, 1000]):
     if range_scalars == None:
         range_scalars = surf.GetPointData().GetScalars(property_name).GetRange()
 
-    
     ctf = vtk.vtkColorTransferFunction()        
     ctf.SetColorSpaceToRGB()
 
@@ -486,10 +591,6 @@ def GetRandomColoredActor(surf, property_name, range_scalars = [0, 1000]):
     return actor
 
 def GetSeparateColoredActor(surf, property_name, range_scalars = [0, 60]):
-    # dico = {}
-    # for i in range(60):
-    #     dico[i] = [np.random.rand(), np.random.rand(), np.random.rand()]
-    # print(dico)
 
     if range_scalars == None:
         range_scalars = surf.GetPointData().GetScalars(property_name).GetRange()
@@ -518,7 +619,6 @@ def GetSeparateColoredActor(surf, property_name, range_scalars = [0, 60]):
     if range_scalars == None:
         range_scalars = surf.GetPointData().GetScalars(property_name).GetRange()
 
-    
     ctf = vtk.vtkColorTransferFunction()        
     ctf.SetColorSpaceToRGB()
 
@@ -607,6 +707,10 @@ def GetColorArray(surf, array_name):
         rgb = (normal*0.5 + 0.5)*255.0
         colored_points.InsertNextTuple3(rgb[0], rgb[1], rgb[2])
     return colored_points
+
+def GetPropertyArray(surf, array_name):
+    property_array = surf.GetPointData().GetArray(array_name)
+    return vtk_to_numpy(property_array)
 
 def GetNormalsActor(surf):
     try:
@@ -931,23 +1035,42 @@ def PolyDataToTensors(surf, device='cpu'):
 
     verts, faces, edges = PolyDataToNumpy(surf)
     
-    verts = ToTensor(dtype=torch.float32, device=device)(verts)
-    faces = ToTensor(dtype=torch.int32, device=device)(faces)
-    edges = ToTensor(dtype=torch.int32, device=device)(edges)
+    verts = torch.tensor(verts).to(torch.float32)
+    faces = torch.tensor(faces).to(torch.int64)
+    edges = torch.tensor(edges).to(torch.int64)
     
     return verts, faces, edges
 
 def PolyDataToNumpy(surf):
 
+    vtk.vtkObject.GlobalWarningDisplayOff()
+    
     edges_filter = vtk.vtkExtractEdges()
     edges_filter.SetInputData(surf)
     edges_filter.Update()
-
+    
     verts = vtk_to_numpy(surf.GetPoints().GetData())
     faces = vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]
     edges = vtk_to_numpy(edges_filter.GetOutput().GetLines().GetData()).reshape(-1, 3)[:,1:]
     
     return verts, faces, edges
+
+def PolyDataToTensors_v_f(surf, device='cpu'):
+
+    verts, faces, = PolyDataToNumpy_v_f(surf)
+    
+    verts = torch.tensor(verts)
+    faces = torch.tensor(faces)
+    
+    return verts, faces
+
+def PolyDataToNumpy_v_f(surf):
+
+    vtk.vtkObject.GlobalWarningDisplayOff()
+    verts = vtk_to_numpy(surf.GetPoints().GetData())
+    faces = vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]
+    
+    return verts, faces
 
 def UnitVerts(verts):
     min_verts, _ = torch.min(verts, axis=0)
