@@ -65,12 +65,15 @@ In this package you have the possibility of running four different models :
 To use ShapeAXI, execute the `saxi_folds.py` script with several options:
 
 ```bash
-usage: shapeaxi [-h] [--csv CSV] [--csv_first_train CSV_FIRST_TRAIN] [--csv_first_test CSV_FIRST_TEST] [--folds FOLDS] [--valid_split VALID_SPLIT] [--group_by GROUP_BY] --nn {SaxiClassification,SaxiRegression,SaxiSegmentation,SaxiIcoClassification}
-                [--csv_train CSV_TRAIN] [--csv_valid CSV_VALID] [--csv_test CSV_TEST] [--model MODEL] [--train_sphere_samples TRAIN_SPHERE_SAMPLES] [--surf_column SURF_COLUMN] [--class_column CLASS_COLUMN] [--scale_factor SCALE_FACTOR]
-                [--column_scale_factor COLUMN_SCALE_FACTOR] [--profiler PROFILER] [--compute_scale_factor COMPUTE_SCALE_FACTOR] [--mount_point MOUNT_POINT] [--num_workers NUM_WORKERS] [--base_encoder BASE_ENCODER] [--base_encoder_params BASE_ENCODER_PARAMS]
-                [--hidden_dim HIDDEN_DIM] [--radius RADIUS] [--image_size IMAGE_SIZE] [--lr LR] [--epochs EPOCHS] [--batch_size BATCH_SIZE] [--patience PATIENCE] [--log_every_n_steps LOG_EVERY_N_STEPS] [--tb_dir TB_DIR] [--tb_name TB_NAME]
-                [--neptune_project NEPTUNE_PROJECT] [--neptune_tags NEPTUNE_TAGS] [--path_ico_right PATH_ICO_RIGHT] [--path_ico_left PATH_ICO_LEFT] [--layer LAYER] [--ico_lvl ICO_LVL] [--mean MEAN] [--std STD] [--crown_segmentation CROWN_SEGMENTATION] [--fdi FDI]
-                [--csv_true_column CSV_TRUE_COLUMN] [--csv_tag_column CSV_TAG_COLUMN] [--csv_prediction_column CSV_PREDICTION_COLUMN] [--eval_metric {F1,AUC}] [--target_layer TARGET_LAYER] [--fps FPS] [--out OUT]
+usage: shapeaxi [-h] [--csv CSV] [--csv_train CSV_TRAIN] [--csv_test CSV_TEST] [--folds FOLDS] [--valid_split VALID_SPLIT] [--group_by GROUP_BY] --nn
+                {SaxiClassification,SaxiRegression,SaxiSegmentation,SaxiIcoClassification,SaxiIcoClassification_fs,SaxiRing,SaxiRingTeeth} [--model MODEL] [--train_sphere_samples TRAIN_SPHERE_SAMPLES]
+                [--surf_column SURF_COLUMN] [--class_column CLASS_COLUMN] [--scale_factor SCALE_FACTOR] [--column_scale_factor COLUMN_SCALE_FACTOR] [--profiler PROFILER]
+                [--compute_scale_factor COMPUTE_SCALE_FACTOR] [--compute_features COMPUTE_FEATURES] [--mount_point MOUNT_POINT] [--num_workers NUM_WORKERS] [--base_encoder BASE_ENCODER]
+                [--base_encoder_params BASE_ENCODER_PARAMS] [--hidden_dim HIDDEN_DIM] [--radius RADIUS] [--image_size IMAGE_SIZE] [--lr LR] [--epochs EPOCHS] [--batch_size BATCH_SIZE]
+                [--patience PATIENCE] [--log_every_n_steps LOG_EVERY_N_STEPS] [--tb_dir TB_DIR] [--tb_name TB_NAME] [--neptune_project NEPTUNE_PROJECT] [--neptune_tags NEPTUNE_TAGS]
+                [--path_ico_right PATH_ICO_RIGHT] [--path_ico_left PATH_ICO_LEFT] [--layer LAYER] [--fs_path FS_PATH] [--num_images NUM_IMAGES] [--ico_lvl ICO_LVL]
+                [--crown_segmentation CROWN_SEGMENTATION] [--fdi FDI] [--csv_true_column CSV_TRUE_COLUMN] [--csv_tag_column CSV_TAG_COLUMN] [--csv_prediction_column CSV_PREDICTION_COLUMN]
+                [--eval_metric {F1,AUC}] [--target_layer TARGET_LAYER] [--fps FPS] [--out OUT]
 
 Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability
 
@@ -79,23 +82,17 @@ optional arguments:
 
 Split:
   --csv CSV             CSV with columns surf,class
-  --csv_first_train CSV_FIRST_TRAIN
+  --csv_train CSV_TRAIN
                         CSV with column surf
-  --csv_first_test CSV_FIRST_TEST
-                        CSV with column surf
+  --csv_test CSV_TEST   CSV with column surf
   --folds FOLDS         Number of folds
   --valid_split VALID_SPLIT
                         Split float [0-1]
   --group_by GROUP_BY   GroupBy criteria in the CSV. For example, SubjectID in case the same subjects has multiple timepoints/data points and the subject must belong to the same data split
 
 Train:
-  --nn {SaxiClassification,SaxiRegression,SaxiSegmentation,SaxiIcoClassification}
-                        Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification
-  --csv_train CSV_TRAIN
-                        CSV with column surf
-  --csv_valid CSV_VALID
-                        CSV with column surf
-  --csv_test CSV_TEST   CSV with column surf
+  --nn {SaxiClassification,SaxiRegression,SaxiSegmentation,SaxiIcoClassification,SaxiIcoClassification_fs,SaxiRing,SaxiRingTeeth}
+                        Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingTeeth
   --model MODEL         Model to continue training
   --train_sphere_samples TRAIN_SPHERE_SAMPLES
                         Number of samples for the training sphere
@@ -110,6 +107,8 @@ Train:
   --profiler PROFILER   Profiler
   --compute_scale_factor COMPUTE_SCALE_FACTOR
                         Compute a global scale factor for all shapes in the population.
+  --compute_features COMPUTE_FEATURES
+                        Compute features for the shapes in the population.
   --mount_point MOUNT_POINT
                         Dataset mount directory
   --num_workers NUM_WORKERS
@@ -141,9 +140,10 @@ Train:
   --path_ico_left PATH_ICO_LEFT
                         Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)
   --layer LAYER         Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)
+  --fs_path FS_PATH     Path to freesurfer folder
+  --num_images NUM_IMAGES
+                        Number of images to use for the training
   --ico_lvl ICO_LVL     Ico level, minimum level is 1 (default: 2)
-  --mean MEAN           Mean (default: 0)
-  --std STD             Standard deviation (default: 0.005)
 
 Prediction group:
   --crown_segmentation CROWN_SEGMENTATION
@@ -227,15 +227,16 @@ shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mou
 
 #### IcoConv (--nn SaxiIcoClassification)
 
+For this model, you **have to** specify the path to your right vtk hemisphere data and same for the left one.
+
 ```bash
 shapeaxi --csv your_data.csv --nn SaxiIcoClassification --epochs 30 --folds 3 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --path_ico_left /path/to/vtk/left/hemisphere --path_ico_right /path/to/vtk/right/hemisphere --class_column ASD_administered
 ```
-For this model, you **have to** specify the path to your right vtk hemisphere data and same for the left one.
 
 #### Regression (--nn SaxiRegression)
 
 ```bash
-shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --compute_scale_factor 1 --surf_column surf --class_column class --batch_size 8
+shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --surf_column surf --class_column class --batch_size 8 --compute_scale_factor 1 --out /path/to/your/output_directory  
 ```
 
 #### Segmentation (--nn SaxiSegmentation)
@@ -244,6 +245,19 @@ shapeaxi --csv your_data.csv --nn SaxiClassification --epochs 40 --folds 5 --mou
 shapeaxi --csv your_data.csv --nn SaxiSegmentation --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --out /path/to/your/output_directory --eval_metric AUC
 ```
 
+#### Ring Neighbors for Brain Data (--nn SaxiRing)
+
+This model creates two networks for each hemisphere of the brain and uses the output surfaces from Freesurfer. If you want to use this model with other data use the **next** model.
+
+```bash
+shapeaxi --csv your_data.csv --nn SaxiRing --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --surf_column surf --class_column class --batch_size 8 --fs_path /path/to/directory/subjects --out /path/to/your/output_directory
+```
+
+#### Ring Neighbors for Teeth (or other) Data (--nn SaxiRingTeeth)
+
+```bash
+shapeaxi --csv your_data.csv --nn SaxiRingTeeth --epochs 40 --folds 5 --mount_point /path/to/your/data/directory --surf_column surf --class_column class --batch_size 8 --out /path/to/your/output_directory
+```
 
 
 ## Experiments & Results
