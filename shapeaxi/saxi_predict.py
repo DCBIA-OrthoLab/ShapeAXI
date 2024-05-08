@@ -12,12 +12,12 @@ from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 import nrrd
 import monai
 
-from . import saxi_nets, utils
-from .saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiIcoDataset_fs 
-from .saxi_transforms import EvalTransform, UnitSurfTransform, TrainTransform, RandomRemoveTeethTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-from .post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
-from .dental_model_seg import segmentation_crown, post_processing
-from .colors import bcolors
+from shapeaxi import saxi_nets, utils
+from shapeaxi.saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiIcoDataset_fs 
+from shapeaxi.saxi_transforms import EvalTransform, UnitSurfTransform, TrainTransform, RandomRemoveTeethTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
+from shapeaxi.post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
+from shapeaxi.dental_model_seg import segmentation_crown, post_processing
+from shapeaxi.colors import bcolors
 torch.backends.cudnn.benchmark = False
 
 # This file proposes a prediction with the test data. It calls SaxiDataset which is a custom class from PyTorch that inherits from torch.utils.data.Datset.
@@ -232,6 +232,7 @@ def SaxiIcoClassification_fs_predict(args, mount_point, df, fname, ext):
     model.to(torch.device(args.device))
     model.eval()
     test_ds = SaxiIcoDataset_fs(df,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
+        
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
     with torch.no_grad():
@@ -279,62 +280,6 @@ def SaxiIcoClassification_fs_predict(args, mount_point, df, fname, ext):
             out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
             df.to_parquet(out_name, index=False)
         print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
-
-
-def SaxiIcoClassification_fs_CT_predict(args, mount_point, df, fname, ext):
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS.load_from_checkpoint(args.model)
-    model.to(torch.device(args.device))
-    model.eval()
-    test_ds = SaxiIcoDataset_fs_CT(df,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
-    test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
-
-    with torch.no_grad():
-        # The prediction is performed on the test data
-        probs = []
-        predictions = []
-        softmax = nn.Softmax(dim=1)
-
-        for idx, batch in tqdm(enumerate(test_loader), total=len(test_loader)):
-            # The generated CAM is processed and added to the input surface mesh (surf) as a point data array
-            VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch 
-            VL = VL.cuda(non_blocking=True,device=args.device)
-            FL = FL.cuda(non_blocking=True,device=args.device)
-            VFL = VFL.cuda(non_blocking=True,device=args.device)
-            FFL = FFL.cuda(non_blocking=True,device=args.device)
-            VR = VR.cuda(non_blocking=True,device=args.device)
-            FR = FR.cuda(non_blocking=True,device=args.device)
-            VFR = VFR.cuda(non_blocking=True,device=args.device)
-            FFR = FFR.cuda(non_blocking=True,device=args.device)
-            FFL = FFL.squeeze(0)
-            FFR = FFR.squeeze(0)
-
-            X = (VL, FL, VFL, FFL, VR, FR, VFR, FFR)
-            x = model(X)
-
-            x = softmax(x).detach()
-            probs.append(x)
-            predictions.append(torch.argmax(x, dim=1, keepdim=True))
-
-        probs = torch.cat(probs).detach().cpu().numpy()
-        predictions = torch.cat(predictions).cpu().numpy().squeeze()
-
-        out_dir = os.path.join(args.out, os.path.basename(args.model))
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
-
-        out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
-        pickle.dump(probs, open(out_probs, 'wb'))
-
-        df['pred'] = predictions
-        if ext == ".csv":
-            out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
-            df.to_csv(out_name, index=False)
-        else:
-            out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
-            df.to_parquet(out_name, index=False)
-        print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
-
 
 
 def main(args):
@@ -362,10 +307,23 @@ def main(args):
         test_ds = SaxiDataset(df, transform=EvalTransform(scale_factor), **vars(args))
         test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
-        if args.nn == "SaxiClassification":
-            SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model)
-        else:
+        if args.nn == "SaxiRegression":
             SaxiRegression_predict(args, mount_point, df, fname, ext, test_loader, model)
+        else:
+            SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model)
+    
+    elif args.nn == "SaxiRingTeeth":
+        SAXINETS = getattr(saxi_nets, args.nn)
+        model = SAXINETS.load_from_checkpoint(args.model)
+        model.to(torch.device(args.device))
+        model.eval()
+        scale_factor = None
+        if model.hparams.scale_factor:
+            scale_factor = model.hparams.scale_factor
+        test_ds = SaxiDataset(df, transform=EvalTransform(scale_factor), **vars(args))
+        test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
+        
+        SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model)
 
     elif args.nn == "SaxiSegmentation":
         SaxiSegmentation_predict(args, mount_point, df, fname, ext) 
@@ -373,11 +331,8 @@ def main(args):
     elif args.nn == "SaxiIcoClassification":
         SaxiIcoClassification_predict(args, mount_point, df, fname, ext)
     
-    elif args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiIcoClassification_fs_four_Att":
+    elif args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiRing":
         SaxiIcoClassification_fs_predict(args, mount_point, df, fname, ext)
-     
-    elif args.nn == 'SaxiIcoClassification_fs_CT_Att' or args.nn == 'SaxiIcoClassification_fs_CT_DS':
-        SaxiIcoClassification_fs_CT_predict(args, mount_point, df, fname, ext)
 
     else:
         raise NotImplementedError(f"Neural network {args.nn} is not implemented")             
@@ -390,7 +345,7 @@ def get_argparse():
     ##Trained
     model_group = parser.add_argument_group('Trained')
     model_group.add_argument('--model', type=str, help='Model for prediction', required=True)
-    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiIcoClassification_fs_CT_Att', 'SaxiIcoClassification_fs_CT_DS'])
+    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingTeeth'])
 
     ##Input
     input_group = parser.add_argument_group('Input')

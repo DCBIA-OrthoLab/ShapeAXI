@@ -16,7 +16,7 @@ sys.path.append(code_path)
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
 
-from . import utils
+from shapeaxi import utils
 
 # File which is a composition of transformations to be applied during training
 

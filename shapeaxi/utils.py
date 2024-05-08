@@ -136,6 +136,22 @@ def CreateIcosahedron(radius):
 
     return icosahedron
 
+def CreateIcosahedronSubdivided(radius, sl):
+    icosahedronsource = vtk.vtkPlatonicSolidSource()
+    icosahedronsource.SetSolidTypeToIcosahedron()
+    icosahedronsource.Update()
+    icosahedron = icosahedronsource.GetOutput()
+    icosahedron = normalize_points(icosahedron, radius)
+
+    subdivfilter = LinearSubdivisionFilter()
+    subdivfilter.SetInputData(icosahedron)
+    subdivfilter.SetNumberOfSubdivisions(sl)
+    subdivfilter.Update()
+    subdivfilter = subdivfilter.GetOutput()
+    subdivfilter = normalize_points(subdivfilter, radius)
+
+    return subdivfilter
+
 def SubdividedIcosahedron(mesh, subdivisions, radius):
     subdivfilter = LinearSubdivisionFilter()
     subdivfilter.SetInputData(mesh)

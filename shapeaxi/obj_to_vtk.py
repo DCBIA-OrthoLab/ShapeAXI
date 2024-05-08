@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 import argparse
 
-from . import utils
+from shapeaxi import utils
 
 #This files contains a function to convert OBJ files to VTK and add the label information to each VTK file
 
