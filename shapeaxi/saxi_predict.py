@@ -312,7 +312,7 @@ def main(args):
         else:
             SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model)
     
-    elif args.nn == "SaxiRingTeeth":
+    elif args.nn == "SaxiRingClassification":
         SAXINETS = getattr(saxi_nets, args.nn)
         model = SAXINETS.load_from_checkpoint(args.model)
         model.to(torch.device(args.device))
@@ -345,7 +345,7 @@ def get_argparse():
     ##Trained
     model_group = parser.add_argument_group('Trained')
     model_group.add_argument('--model', type=str, help='Model for prediction', required=True)
-    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingTeeth'])
+    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingClassification'])
 
     ##Input
     input_group = parser.add_argument_group('Input')

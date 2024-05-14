@@ -312,7 +312,7 @@ def main(args):
     elif args.nn == "SaxiIcoClassification_fs":
         SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
     
-    elif args.nn == "SaxiRing" or args.nn == "SaxiRingTeeth":
+    elif args.nn == "SaxiRing" or args.nn == "SaxiRingClassification":
         SaxiRing_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
     
     elif args.nn == "SaxiRingMT":
@@ -345,7 +345,7 @@ def get_argparse():
 
     ##Hyperparameters
     hyper_group = parser.add_argument_group('Hyperparameters')
-    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingTeeth', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", "SaxiRing", "SaxiRingTeeth", "SaxiRingMT"])
+    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", "SaxiRing", "SaxiRingClassification", "SaxiRingMT"])
     hyper_group.add_argument('--base_encoder', type=str, help='Base encoder for the feature extraction', default='resnet18')
     hyper_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512')
     hyper_group.add_argument('--hidden_dim', type=int, help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', default=512)
@@ -359,7 +359,6 @@ def get_argparse():
     hyper_group.add_argument('--patience', type=int, help='Patience for early stopping', default=30)
     hyper_group.add_argument('--scale_factor', type=float, help='Scale factor to rescale the shapes', default=1.0) 
     hyper_group.add_argument('--noise_lvl', type=float, help='Noise level (default: 0.01)', default=0.01)
-    hyper_group.add_argument('--ico_lvl', type=int, help='Ico level, minimum level is 1 (default: 2)', default=2)
     hyper_group.add_argument('--pretrained',  type=bool, help='Pretrained (default: False)', default=False)
     hyper_group.add_argument('--dropout_lvl',  type=float, help='Dropout level (default: 0.2)', default=0.2)
     hyper_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')

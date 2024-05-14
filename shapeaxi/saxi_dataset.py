@@ -353,11 +353,6 @@ class SaxiIcoDataset_fs(Dataset):
             self.data_to_tensor(path_sulc).unsqueeze(dim=1),
         ]
 
-        groups = self.df.groupby('Subject_ID')
-        for name, group in groups:
-            nb_timepoints = len(group)
-            print(f'Nb timepoints: {nb_timepoints}')
-
         sphere_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg')
         sphere_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg.vtk')
         wm_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white')
@@ -520,20 +515,24 @@ class SaxiIcoDataModule_MT(pl.LightningDataModule):
         self.train_dataset = SaxiIcoDataset_MT(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.val_dataset = SaxiIcoDataset_MT(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.test_dataset = SaxiIcoDataset_MT(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        VL, FL, VFL, FFL,VR, FR, VFR, FFR, Y = self.train_dataset.__getitem__(0)
-
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR, NB_TP, Y = self.train_dataset.__getitem__(0)
+    
     def pad_verts_faces(self, batch):
-        verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        faces_l = [fl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        vertex_features_l = [vfl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        face_features_l = [ffl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        verts_r = [vr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        faces_r = [fr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        vertex_features_r = [vfr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        face_features_r = [ffr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
-        Y = [y for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]     
+        verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        faces_l = [fl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        vertex_features_l = [vfl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        face_features_l = [ffl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        verts_r = [vr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        faces_r = [fr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        vertex_features_r = [vfr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        face_features_r = [ffr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        nb_timepoints = [nb_tp for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+        Y = [y for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
 
+        print("Before padding - verts_l sizes:", [verts.size() for verts in verts_l]) 
         verts_l = pad_sequence(verts_l, batch_first=True, padding_value=0.0) 
+        print("After padding - verts_l sizes:", [verts.size() for verts in verts_l])
+
         faces_l = pad_sequence(faces_l, batch_first=True, padding_value=-1)
         vertex_features_l = pad_sequence(vertex_features_l, batch_first=True, padding_value=0.0)
         face_features_l = torch.cat(face_features_l)
@@ -543,8 +542,8 @@ class SaxiIcoDataModule_MT(pl.LightningDataModule):
         face_features_r = torch.cat(face_features_r)
         Y = torch.tensor(Y)
 
-        return verts_l, faces_l, vertex_features_l, face_features_l, verts_r, faces_r, vertex_features_r, face_features_r, Y
-    
+        return verts_l, faces_l, vertex_features_l, face_features_l, verts_r, faces_r, vertex_features_r, face_features_r, nb_timepoints, Y
+
     def train_dataloader(self):  
         return DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)
 
@@ -567,17 +566,18 @@ class SaxiIcoDataset_MT(Dataset):
         self.name_class = name_class
         self.freesurfer_path = freesurfer_path
         self.df_grouped = df.groupby('Subject_ID')
+        self.keys = list(self.df_grouped.groups.keys())
 
     def __len__(self):
-        return(len(self.df)) 
+        return(len(self.keys))
 
     def __getitem__(self,idx):
         #Get item for each hemisphere (left and right)
-        subject_id, subject_data = self.df_grouped.nth(idx)
-        print(subject_data)
-        vertsL, facesL, vertex_featuresL, face_featuresL,Y = self.getitem_per_hemisphere('L', idx)
-        vertsR, facesR, vertex_featuresR, face_featuresR,Y = self.getitem_per_hemisphere('R', idx)
-        return  vertsL, facesL, vertex_featuresL, face_featuresL, vertsR, facesR, vertex_featuresR, face_featuresR, Y 
+        subject_id = self.keys[idx]  # Get the subject ID corresponding to the index
+        subject_data = self.df_grouped.get_group(subject_id)  # Get the data for this subject ID
+        vertsL, facesL, vertex_featuresL, face_featuresL, nb_timepoints, Y = self.getitem_per_hemisphere('L', subject_data)
+        vertsR, facesR, vertex_featuresR, face_featuresR, nb_timepoints, Y = self.getitem_per_hemisphere('R', subject_data)
+        return  vertsL, facesL, vertex_featuresL, face_featuresL, vertsR, facesR, vertex_featuresR, face_featuresR, nb_timepoints, Y 
     
     def data_to_tensor(self,path):
         data = nib.freesurfer.read_morph_data(path)
@@ -609,65 +609,78 @@ class SaxiIcoDataset_MT(Dataset):
 
         return sphere
 
-            
     # Get the verts, faces, vertex_features, face_features and Y from an hemisphere
-    def getitem_per_hemisphere(self, hemisphere, idx):
-        white_matter_vertex = False
-        row = self.df.loc[idx]
-        sub_session = '_ses-' + row['eventname'].replace('_', '').replace('year', 'Year').replace('arm', 'Arm').replace('followup', 'FollowUp').replace('yArm','YArm')
-        path_to_fs_data = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf')
+    def getitem_per_hemisphere(self, hemisphere, subject_data):
+        verts_list, faces_list, vertex_features_list, face_features_list, Y_list = [], [], [], [], []
+        nb_timepoints = len(subject_data)
 
-        # Load Data
-        hemisphere_prefix = 'lh' if hemisphere == 'L' else 'rh'
-        path_sa = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.area')
-        path_thickness = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.thickness')
-        path_curvature = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.curv')
-        path_sulc = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sulc')
+        for idx, row in subject_data.iterrows():
+            sub_session = '_ses-' + row['eventname'].replace('_', '').replace('year', 'Year').replace('arm', 'Arm').replace('followup', 'FollowUp').replace('yArm','YArm')
+            path_to_fs_data = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf')
 
-        l_features = [
-            self.data_to_tensor(path_sa).unsqueeze(dim=1),
-            self.data_to_tensor(path_thickness).unsqueeze(dim=1),
-            self.data_to_tensor(path_curvature).unsqueeze(dim=1),
-            self.data_to_tensor(path_sulc).unsqueeze(dim=1),
-        ]
+            # Load Data
+            hemisphere_prefix = 'lh' if hemisphere == 'L' else 'rh'
+            path_sa = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.area')
+            path_thickness = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.thickness')
+            path_curvature = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.curv')
+            path_sulc = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sulc')
 
-        sphere_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg')
-        sphere_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg.vtk')
-        wm_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white')
-        wm_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white.vtk')
+            l_features = [
+                self.data_to_tensor(path_sa).unsqueeze(dim=1),
+                self.data_to_tensor(path_thickness).unsqueeze(dim=1),
+                self.data_to_tensor(path_curvature).unsqueeze(dim=1),
+                self.data_to_tensor(path_sulc).unsqueeze(dim=1),
+            ]
 
-        paths = [path_sa, path_thickness, path_curvature, path_sulc, sphere_path, wm_path, sphere_vtk_path, wm_vtk_path]
+            sphere_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg')
+            sphere_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sphere.reg.vtk')
+            wm_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white')
+            wm_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white.vtk')
 
-        for path in paths:
-            if not os.path.exists(path):
-                print(f'File {path} does not exist')
-                return
+            paths = [path_sa, path_thickness, path_curvature, path_sulc, sphere_path, wm_path, sphere_vtk_path, wm_vtk_path]
 
-        if not os.path.exists(sphere_vtk_path):
-            mris_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
-            subprocess.run(mris_command, shell=True)
-        if not os.path.exists(wm_vtk_path):
-            mris_command = f'mris_convert {wm_path} {wm_vtk_path}'
-            subprocess.run(mris_command, shell=True)
+            for path in paths:
+                if not os.path.exists(path):
+                    print(f'File {path} does not exist')
+                    return
 
-        sphere = utils.ReadSurf(sphere_vtk_path)
-        sphere = self.set_wm_as_texture(sphere, wm_vtk_path)
+            if not os.path.exists(sphere_vtk_path):
+                mris_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
+                subprocess.run(mris_command, shell=True)
+            if not os.path.exists(wm_vtk_path):
+                mris_command = f'mris_convert {wm_path} {wm_vtk_path}'
+                subprocess.run(mris_command, shell=True)
 
-        vertex_features = torch.cat(l_features, dim=1)
+            sphere = utils.ReadSurf(sphere_vtk_path)
+            sphere = self.set_wm_as_texture(sphere, wm_vtk_path)
 
-        #Y
-        Y = torch.tensor([int(row[self.name_class])])
+            vertex_features = torch.cat(l_features, dim=1)
 
-        #Sphere per hemisphere
-        verts, faces = utils.PolyDataToTensors_v_f(sphere)
+            #Y
+            Y = torch.tensor([int(row[self.name_class])])
 
-        #Transformations
-        if self.transform:        
-            verts = self.transform(verts)
+            #Sphere per hemisphere
+            verts, faces = utils.PolyDataToTensors_v_f(sphere)
 
-        # Face Features
-        faces_pid0 = faces[:,0:1]       
-        
-        face_features = torch.cat([torch.take(vf, faces_pid0) for vf in vertex_features.transpose(0, 1)], dim=-1)
-        
-        return verts, faces, vertex_features, face_features, Y
+            #Transformations
+            if self.transform:        
+                verts = self.transform(verts)
+
+            # Face Features
+            faces_pid0 = faces[:,0:1]       
+
+            face_features = torch.cat([torch.take(vf, faces_pid0) for vf in vertex_features.transpose(0, 1)], dim=-1)
+
+            verts_list.append(verts)
+            faces_list.append(faces)
+            vertex_features_list.append(vertex_features)
+            face_features_list.append(face_features)
+            Y_list.append(Y)
+       
+        # print("Before padding - verts_list sizes:", [verts.size() for verts in verts_list])
+        verts_list = pad_sequence(verts_list, batch_first=True, padding_value=0.0) 
+        # print("After padding - verts_list sizes:", [verts.size() for verts in verts_list])
+        faces_list = pad_sequence(faces_list, batch_first=True, padding_value=-1)
+        vertex_features_list = pad_sequence(vertex_features_list, batch_first=True, padding_value=0.0)
+
+        return verts_list, faces_list, vertex_features_list, face_features_list, nb_timepoints, Y

@@ -534,7 +534,7 @@ class SaxiIcoClassification(pl.LightningModule):
         self.y_pred = []
         self.y_true = []
 
-        ico_sphere = utils.CreateIcosahedronSubdivided(self.hparams.radius, self.hparams.ico_lvl)
+        ico_sphere = utils.CreateIcosahedronSubdivided(self.hparams.radius, self.hparams.subdivision_level)
         ico_sphere_verts, ico_sphere_faces, self.ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
         self.ico_sphere_verts = ico_sphere_verts
         self.ico_sphere_edges = np.array(self.ico_sphere_edges)
@@ -803,9 +803,7 @@ class SaxiIcoClassification_fs(pl.LightningModule):
         self.y_pred = []
         self.y_true = []
 
-        icosahedron = utils.CreateIcosahedronSubdivided(self.hparams.radius)
-        # ico_sphere = utils.SubdividedIcosahedron(icosahedron, self.hparams.subdivision_level, self.hparams.radius)
-        ico_sphere = utils.SubdividedIcosahedron(icosahedron, 2, self.hparams.radius)
+        ico_sphere = utils.CreateIcosahedronSubdivided(self.hparams.radius, self.hparams.subdivision_level)
         ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(ico_sphere)
         self.ico_sphere_verts = ico_sphere_verts
         self.ico_sphere_edges = ico_sphere_edges
@@ -1176,9 +1174,6 @@ class DentalModelSeg(pl.LightningModule):
         
 
         ico = utils.CreateIcosahedronSubdivided(self.hparams.radius, self.hparams.subdivision_level)
-
-        if subdivision_level > 0:
-            ico = utils.SubdividedIcosahedron(ico,self.hparams.subdivision_level,self.hparams.radius)
 
         ico_verts, ico_faces, ico_edges = utils.PolyDataToTensors(ico)
         ico_verts = ico_verts.to(torch.float32)
@@ -1561,10 +1556,10 @@ class SaxiRing(pl.LightningModule):
 #                                                                                                                                                                                   #
 #####################################################################################################################################################################################
 
-class SaxiRingTeeth(pl.LightningModule):
+class SaxiRingClassification(pl.LightningModule):
     # Saxi classification network
     def __init__(self, **kwargs):
-        super(SaxiRingTeeth, self).__init__()
+        super(SaxiRingClassification, self).__init__()
         self.save_hyperparameters()
         self.class_weights = None
 
@@ -1578,7 +1573,14 @@ class SaxiRingTeeth(pl.LightningModule):
 
         # Get the neighbors to go form level N to level N-1
         ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
-        ring_neighs_162 = utils.GetPreservedPointIds(self.ico_42,self.ico_162)
+        
+        # Create the down blocks to go from 162 -> 42
+        self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_42)
+
+        # Create the down blocks to go from 162 -> 42
+        if self.hparams.subdivision_level == 3:
+            ring_neighs_162 = utils.GetPreservedPointIds(self.ico_42,self.ico_162)
+            self.down1 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_162)  
 
         # Layers of the network
         self.TimeD = TimeDistributed(self.convnet)
@@ -1586,10 +1588,6 @@ class SaxiRingTeeth(pl.LightningModule):
         self.Att = SelfAttention(self.hparams.hidden_dim, self.hparams.out_size, dim=2)  
         self.Drop = nn.Dropout(p=self.hparams.dropout_lvl)
         self.Classification = nn.Linear(self.ico_12.GetNumberOfPoints(), self.hparams.out_classes)  
-
-        # Create the down blocks to go from 162 -> 42 -> 12
-        self.down1 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_162)
-        self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_42)  
 
         cameras = FoVPerspectiveCameras()
 
@@ -1611,16 +1609,16 @@ class SaxiRingTeeth(pl.LightningModule):
         model_params = eval('dict(%s)' % self.hparams.base_encoder_params.replace(' ',''))
         self.convnet = template_model(**model_params)
 
-        # Create the icosahedrons form each level
-        self.ico_12 = utils.CreateIcosahedron(self.hparams.radius) # 12 vertices
-        self.ico_42 = utils.SubdividedIcosahedron(self.ico_12,2,self.hparams.radius) # 42 vertices
-        self.ico_162 = utils.SubdividedIcosahedron(self.ico_42,2,self.hparams.radius) # 162 vertices
-
-        # Get the neighbors to go form level N to level N-1
+        self.ico_12 = utils.CreateIcosahedron(self.hparams.radius)
+        self.ico_42 = utils.SubdividedIcosahedron(self.ico_12,2,self.hparams.radius)
         self.ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
-        self.ring_neighs_162 = utils.GetPreservedPointIds(self.ico_42,self.ico_162)
 
-        ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(self.ico_162)
+        if self.hparams.subdivision_level == 2:
+            ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(self.ico_42)
+        else:
+            self.ico_162 = utils.SubdividedIcosahedron(self.ico_42,2,self.hparams.radius)
+            self.ring_neighs_162 = utils.GetPreservedPointIds(self.ico_42,self.ico_162)
+            ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(self.ico_162)
 
         ico_verts = ico_sphere_verts.to(torch.float32)
 
@@ -1646,7 +1644,8 @@ class SaxiRingTeeth(pl.LightningModule):
     def forward(self, x):
         # Forward pass
         x = self.TimeD(x)
-        x, score = self.down1(x)
+        if self.hparams.subdivision_level == 3:
+            x, score = self.down1(x)
         x, score = self.down2(x)
         value = self.W(x)
         x, x_s = self.Att(x, value)

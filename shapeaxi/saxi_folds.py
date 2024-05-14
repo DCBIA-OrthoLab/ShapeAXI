@@ -572,7 +572,7 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingTeeth', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingTeeth', 'SaxiRingMT'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT'])
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--train_sphere_samples', type=int, help='Number of samples for the training sphere', default=10000)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
@@ -603,7 +603,7 @@ def cml():
     train_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')
     train_group.add_argument('--fs_path', type=str, help='Path to freesurfer folder', default=None)
     train_group.add_argument('--num_images', type=int, help='Number of images to use for the training', default=12)
-    train_group.add_argument('--ico_lvl', type=int, help='Ico level, minimum level is 1 (default: 2)', default=2)
+    train_group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=1)
 
     # Arguments used for prediction
     pred_group = parser.add_argument_group('Prediction group')
