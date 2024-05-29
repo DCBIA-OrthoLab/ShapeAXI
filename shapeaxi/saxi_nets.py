@@ -28,7 +28,7 @@ import os
 
 from shapeaxi import utils
 from shapeaxi.IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
-from shapeaxi.saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, SelfAttention, Identity, TimeDistributed
+from shapeaxi.saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, Identity, TimeDistributed
 from shapeaxi.colors import bcolors
 
 
@@ -1309,11 +1309,9 @@ class AttentionRing(nn.Module):
 class AttentionRings(nn.Module):
     def __init__(self, in_units, out_v_units, out_q_units, neigh_orders):
         super(AttentionRings, self).__init__()
-
         self.Q = nn.Linear(in_units, out_q_units)
         self.Att = AttentionRing(in_units, out_v_units, neigh_orders)
         
-
     def forward(self, x):
         query = self.Q(x)
         context_vector, score = self.Att(query, x)
@@ -1571,16 +1569,20 @@ class SaxiRingClassification(pl.LightningModule):
         self.loss = nn.CrossEntropyLoss(weight=self.class_weights)
         self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.out_classes)
 
-        # Get the neighbors to go form level N to level N-1
-        ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
-        
-        # Create the down blocks to go from 162 -> 42
-        self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_42)
+        if self.hparams.subdivision_level == 2:
+            # Get the neighbors to go form level N to level N-1
+            ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
+            # Create the down blocks to go from 42 -> 12
+            self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_42)
 
-        # Create the down blocks to go from 162 -> 42
-        if self.hparams.subdivision_level == 3:
+        elif self.hparams.subdivision_level == 3:
             ring_neighs_162 = utils.GetPreservedPointIds(self.ico_42,self.ico_162)
-            self.down1 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_162)  
+            # Create the down blocks to go from 162 -> 42
+            self.down1 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_162) 
+            # Get the neighbors to go form level N to level N-1
+            ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
+            # Create the down blocks to go from 42 -> 12
+            self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_42)
 
         # Layers of the network
         self.TimeD = TimeDistributed(self.convnet)
@@ -1610,16 +1612,23 @@ class SaxiRingClassification(pl.LightningModule):
         self.convnet = template_model(**model_params)
 
         self.ico_12 = utils.CreateIcosahedron(self.hparams.radius)
-        self.ico_42 = utils.SubdividedIcosahedron(self.ico_12,2,self.hparams.radius)
-        self.ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
+        
+        if self.hparams.subdivision_level == 1:
+            ico = self.ico_12
 
-        if self.hparams.subdivision_level == 2:
-            ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(self.ico_42)
+        elif self.hparams.subdivision_level == 2:
+            self.ico_42 = utils.SubdividedIcosahedron(self.ico_12,2,self.hparams.radius)
+            self.ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
+            ico = self.ico_42
+
         else:
+            self.ico_42 = utils.SubdividedIcosahedron(self.ico_12,2,self.hparams.radius)
+            self.ring_neighs_42 = utils.GetPreservedPointIds(self.ico_12,self.ico_42)
             self.ico_162 = utils.SubdividedIcosahedron(self.ico_42,2,self.hparams.radius)
             self.ring_neighs_162 = utils.GetPreservedPointIds(self.ico_42,self.ico_162)
-            ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(self.ico_162)
-
+            ico = self.ico_162
+        
+        ico_sphere_verts, ico_sphere_faces, ico_sphere_edges = utils.PolyDataToTensors(ico)
         ico_verts = ico_sphere_verts.to(torch.float32)
 
         for idx, v in enumerate(ico_verts):
@@ -1646,7 +1655,11 @@ class SaxiRingClassification(pl.LightningModule):
         x = self.TimeD(x)
         if self.hparams.subdivision_level == 3:
             x, score = self.down1(x)
-        x, score = self.down2(x)
+            x, score = self.down2(x)
+        elif self.hparams.subdivision_level == 2:
+            x, score = self.down2(x)
+        else:
+            x = self.W(x)
         value = self.W(x)
         x, x_s = self.Att(x, value)
         x = self.Drop(x)
@@ -1714,6 +1727,13 @@ class SaxiRingClassification(pl.LightningModule):
         self.log("val_acc", self.accuracy, batch_size=batch_size, sync_dist=True)
 
 
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                SaxiRing Multiple TimePoints                                                                       #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
+
 
 class SaxiRingMT(pl.LightningModule):
     def __init__(self, **kwargs):
@@ -1721,6 +1741,7 @@ class SaxiRingMT(pl.LightningModule):
         self.save_hyperparameters()
         self.y_pred = []
         self.y_true = []
+        self.timepoints = ['T1', 'T2', 'T3']
 
         # Create the icosahedrons form each level
         ico_12 = utils.CreateIcosahedron(self.hparams.radius) # 12 vertices
@@ -1876,38 +1897,48 @@ class SaxiRingMT(pl.LightningModule):
 
 
     def training_step(self, train_batch, batch_idx):
-        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = train_batch
-        x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-        loss = self.loss_train(x,Y)
-        self.log('train_loss', loss) 
-        predictions = torch.argmax(x, dim=1, keepdim=True)
-        self.train_accuracy(predictions, Y.reshape(-1, 1))
-        self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
-
-        return loss
+        for timepoint in self.timepoints:
+            left_side = f'{timepoint}L'
+            right_side = f'{timepoint}R'
+            VL, FL, VFL, FFL, Y = train_batch[left_side]
+            VR, FR, VFR, FFR, Y = train_batch[right_side]
+            x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
+            loss = self.loss_train(x,Y)
+            self.log('train_loss', loss) 
+            predictions = torch.argmax(x, dim=1, keepdim=True)
+            self.train_accuracy(predictions, Y.reshape(-1, 1))
+            self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)        
+            return loss
 
 
     def validation_step(self,val_batch,batch_idx):
-        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = val_batch
-        x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-        loss = self.loss_val(x,Y)
-        self.log('val_loss', loss)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
-        val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
-        self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
-
-        return val_acc
+        for timepoint in self.timepoints:
+            left_side = f'{timepoint}L'
+            right_side = f'{timepoint}R'
+            VL, FL, VFL, FFL, Y = val_batch[left_side]
+            VR, FR, VFR, FFR, Y = val_batch[right_side]
+            x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
+            loss = self.loss_val(x,Y)
+            self.log('val_loss', loss)
+            predictions = torch.argmax(x, dim=1, keepdim=True)
+            val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
+            self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
+            return val_acc
 
 
     def test_step(self,test_batch,batch_idx):
-        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
-        x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-        loss = self.loss_test(x,Y)
-        self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        for timepoint in self.timepoints:
+            left_side = f'{timepoint}L'
+            right_side = f'{timepoint}R'
+            VL, FL, VFL, FFL, Y = val_batch[left_side]
+            VR, FR, VFR, FFR, Y = val_batch[right_side]
+            x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
+            loss = self.loss_test(x,Y)
+            self.log('test_loss', loss, batch_size=self.hparams.batch_size)
+            predictions = torch.argmax(x, dim=1, keepdim=True)
+            output = [predictions,Y]
 
-        return output
+            return output
 
 
     def test_epoch_end(self,input_test):
@@ -1919,10 +1950,6 @@ class SaxiRingMT(pl.LightningModule):
         target_names = ['No QC','QC']
         self.y_pred = y_pred
         self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
 
 
     def GetView(self,meshes,index):

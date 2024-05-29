@@ -331,7 +331,7 @@ def main(args):
     elif args.nn == "SaxiIcoClassification":
         SaxiIcoClassification_predict(args, mount_point, df, fname, ext)
     
-    elif args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiRing":
+    elif args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiRing" or args.nn == "SaxiRingMT":
         SaxiIcoClassification_fs_predict(args, mount_point, df, fname, ext)
 
     else:
@@ -345,7 +345,7 @@ def get_argparse():
     ##Trained
     model_group = parser.add_argument_group('Trained')
     model_group.add_argument('--model', type=str, help='Model for prediction', required=True)
-    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingClassification'])
+    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT'])
 
     ##Input
     input_group = parser.add_argument_group('Input')

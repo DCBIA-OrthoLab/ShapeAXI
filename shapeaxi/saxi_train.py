@@ -144,7 +144,7 @@ def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, v
         callbacks.append(image_logger)
     #Trainer
     trainer = Trainer(log_every_n_steps=10,reload_dataloaders_every_n_epochs=True,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu") #,accelerator="gpu"
-    trainer.fit(model,datamodule=brain_data)
+    trainer.fit(model,datamodule=brain_data,ckpt_path=args.model)
 
 
 def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
@@ -185,7 +185,7 @@ def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train
         callbacks.append(image_logger)
 
     trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
-    trainer.fit(model,datamodule=brain_data)
+    trainer.fit(model,datamodule=brain_data,ckpt_path=args.model)
 
 
 def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
@@ -209,56 +209,21 @@ def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, ear
     unique_classes = np.sort(np.unique(df_train[args.class_column]))
     nb_classes = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column])) 
    
-    if args.fs_path is None:
+    if args.nn == "SaxiRingClassification":
+        #Use of SaxiRingClassifiction
         df_val = pd.read_csv(val)
         df_test = pd.read_csv(test)
         data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,model = args.nn,surf_column = args.surf_column,class_column = args.class_column, train_transform = TrainTransform(scale_factor=args.scale_factor),valid_transform = EvalTransform(scale_factor=args.scale_factor),test_transform = EvalTransform(scale_factor=args.scale_factor))
         saxi_args['class_weights'] = nb_classes
 
-    else:
+    elif args.nn == "SaxiRing":
+        #Use of SaxiRing
         data = SaxiIcoDataModule_fs(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
     
-    saxi_args['out_classes'] = len(nb_classes)  
-    saxi_args['out_size'] = 256
+    else:
+        #Use of SaxiRingMT
+        data = SaxiIcoDataModule_MT(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
 
-    print("Number of classes:",len(nb_classes))
-
-    #Creation of our model
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS(**saxi_args)
-
-    callbacks = [early_stop_callback, checkpoint_callback]
-    logger, image_logger = logger_neptune_tensorboard(args)
-
-    if image_logger:
-        callbacks.append(image_logger)
-
-    trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
-    trainer.fit(model,datamodule=data)
-
-
-def SaxiRingMT_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
-    #Transformation
-    list_train_transform = [] 
-    list_train_transform.append(CenterTransform())
-    list_train_transform.append(NormalizePointTransform())
-    list_train_transform.append(RandomRotationTransform())        
-    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) #Do not use this transformation if your object is not a sphere
-    list_train_transform.append(NormalizePointTransform()) #Do not use this transformation if your object is not a sphere
-    train_transform = monai.transforms.Compose(list_train_transform)
-
-    list_val_and_test_transform = []    
-    list_val_and_test_transform.append(CenterTransform())
-    list_val_and_test_transform.append(NormalizePointTransform())
-    val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
-
-    saxi_args = vars(args)
-
-    df_train = pd.read_csv(train)
-    unique_classes = np.sort(np.unique(df_train[args.class_column]))
-    nb_classes = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column])) 
-    
-    data = SaxiIcoDataModule_MT(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
     
     saxi_args['out_classes'] = len(nb_classes)  
     saxi_args['out_size'] = 256
@@ -276,7 +241,7 @@ def SaxiRingMT_train(args, checkpoint_callback, mount_point, train, val, test, e
         callbacks.append(image_logger)
 
     trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
-    trainer.fit(model,datamodule=data)
+    trainer.fit(model,datamodule=data,ckpt_path=args.model)
 
 
 def main(args):
@@ -312,11 +277,8 @@ def main(args):
     elif args.nn == "SaxiIcoClassification_fs":
         SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
     
-    elif args.nn == "SaxiRing" or args.nn == "SaxiRingClassification":
+    elif args.nn == "SaxiRing" or args.nn == "SaxiRingClassification" or args.nn == "SaxiRingMT":
         SaxiRing_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
-    
-    elif args.nn == "SaxiRingMT":
-        SaxiRingMT_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
     
     else:
         raise ValueError ("Unknown neural network name: {}, choose between SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification".format(args.nn))

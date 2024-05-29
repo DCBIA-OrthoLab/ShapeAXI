@@ -12,6 +12,7 @@ from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
 import vtk
 import random
+import torch.nn.functional as F
 from torch.nn.functional import normalize
 import nibabel as nib
 from fsl.data import gifti
@@ -414,8 +415,6 @@ class SaxiIcoDataModule_fs(pl.LightningDataModule):
         self.df_test = pd.read_csv(self.data_test)
         self.weights = self.class_weights()
 
-        self.setup()
-    
     def class_weights(self):
         class_weights_train = self.compute_class_weights(self.data_train)
         class_weights_val = self.compute_class_weights(self.data_val)
@@ -434,7 +433,6 @@ class SaxiIcoDataModule_fs(pl.LightningDataModule):
         self.train_dataset = SaxiIcoDataset_fs(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.val_dataset = SaxiIcoDataset_fs(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.test_dataset = SaxiIcoDataset_fs(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        VL, FL, VFL, FFL,VR, FR, VFR, FFR, Y = self.train_dataset.__getitem__(0)
 
     def pad_verts_faces(self, batch):
         verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
@@ -495,7 +493,6 @@ class SaxiIcoDataModule_MT(pl.LightningDataModule):
         self.df_test = pd.read_csv(self.data_test)
         self.weights = self.class_weights()
 
-        self.setup()
     
     def class_weights(self):
         class_weights_train = self.compute_class_weights(self.data_train)
@@ -515,43 +512,55 @@ class SaxiIcoDataModule_MT(pl.LightningDataModule):
         self.train_dataset = SaxiIcoDataset_MT(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.val_dataset = SaxiIcoDataset_MT(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
         self.test_dataset = SaxiIcoDataset_MT(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        VL, FL, VFL, FFL, VR, FR, VFR, FFR, NB_TP, Y = self.train_dataset.__getitem__(0)
     
-    def pad_verts_faces(self, batch):
-        verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        faces_l = [fl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        vertex_features_l = [vfl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        face_features_l = [ffl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        verts_r = [vr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        faces_r = [fr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        vertex_features_r = [vfr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        face_features_r = [ffr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        nb_timepoints = [nb_tp for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
-        Y = [y for vl, fl, vfl, ffl, vr, fr, vfr, ffr, nb_tp, y in batch]
+    def pad_verts_faces_through_timepoints(self, batch):
+        padded_batch = {}
+        timepoints = ['T1L', 'T1R', 'T2L', 'T2R', 'T3R', 'T3L']
+        # Initialize the dictionary with empty lists for each timepoint
+        for timepoint in timepoints:
+            padded_batch[timepoint] = []
 
-        print("Before padding - verts_l sizes:", [verts.size() for verts in verts_l]) 
-        verts_l = pad_sequence(verts_l, batch_first=True, padding_value=0.0) 
-        print("After padding - verts_l sizes:", [verts.size() for verts in verts_l])
+        # Collect the values for each timepoint
+        for timepoint in timepoints:
+            for b in batch:
+                value = b.get(timepoint)
+                padded_batch[timepoint].append(value)
 
-        faces_l = pad_sequence(faces_l, batch_first=True, padding_value=-1)
-        vertex_features_l = pad_sequence(vertex_features_l, batch_first=True, padding_value=0.0)
-        face_features_l = torch.cat(face_features_l)
-        verts_r = pad_sequence(verts_r, batch_first=True, padding_value=0.0)
-        faces_r = pad_sequence(faces_r, batch_first=True, padding_value=-1)
-        vertex_features_r = pad_sequence(vertex_features_r, batch_first=True, padding_value=0.0)
-        face_features_r = torch.cat(face_features_r)
+        # Pad the values for each timepoint
+        for timepoint in timepoints:
+            padded_batch[timepoint] = self.pad_verts_faces(padded_batch[timepoint])
+
+        return padded_batch
+
+    def pad_verts_faces(self, value):
+
+        if any(v is None for v in value):
+            return torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([])
+
+        verts = [v for v, f, vf, ff, y in value]
+        faces = [f for v, f, vf, ff, y in value]
+        vertex_features = [vf for v, f, vf, ff, y in value]
+        face_features = [ff for v, f, vf, ff, y in value]
+        Y = [y for v, f, vf, ff, y in value]
+
+        # Padding the sequences
+        verts = pad_sequence(verts, batch_first=True, padding_value=0.0) 
+        faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+        vertex_features = pad_sequence(vertex_features, batch_first=True, padding_value=0.0)
+        face_features = torch.cat(face_features)
         Y = torch.tensor(Y)
 
-        return verts_l, faces_l, vertex_features_l, face_features_l, verts_r, faces_r, vertex_features_r, face_features_r, nb_timepoints, Y
+        return verts, faces, vertex_features, face_features, Y
+
 
     def train_dataloader(self):  
-        return DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)
+        return DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces_through_timepoints)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)        
+        return DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces_through_timepoints)        
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces)
+        return DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, pin_memory=True, persistent_workers=True, drop_last=True, collate_fn=self.pad_verts_faces_through_timepoints)
 
     def get_weigths(self):
         return self.weights
@@ -575,10 +584,11 @@ class SaxiIcoDataset_MT(Dataset):
         #Get item for each hemisphere (left and right)
         subject_id = self.keys[idx]  # Get the subject ID corresponding to the index
         subject_data = self.df_grouped.get_group(subject_id)  # Get the data for this subject ID
-        vertsL, facesL, vertex_featuresL, face_featuresL, nb_timepoints, Y = self.getitem_per_hemisphere('L', subject_data)
-        vertsR, facesR, vertex_featuresR, face_featuresR, nb_timepoints, Y = self.getitem_per_hemisphere('R', subject_data)
-        return  vertsL, facesL, vertex_featuresL, face_featuresL, vertsR, facesR, vertex_featuresR, face_featuresR, nb_timepoints, Y 
-    
+        dicoL = self.getitem_per_hemisphere('L', subject_data)
+        dicoR = self.getitem_per_hemisphere('R', subject_data)
+        merged_dico = dicoL | dicoR
+        return  merged_dico
+
     def data_to_tensor(self,path):
         data = nib.freesurfer.read_morph_data(path)
         data = data.byteswap().newbyteorder()
@@ -611,10 +621,11 @@ class SaxiIcoDataset_MT(Dataset):
 
     # Get the verts, faces, vertex_features, face_features and Y from an hemisphere
     def getitem_per_hemisphere(self, hemisphere, subject_data):
-        verts_list, faces_list, vertex_features_list, face_features_list, Y_list = [], [], [], [], []
+        dico = {}
         nb_timepoints = len(subject_data)
+        timepoint_counter = 1
 
-        for idx, row in subject_data.iterrows():
+        for _, row in subject_data.iterrows():
             sub_session = '_ses-' + row['eventname'].replace('_', '').replace('year', 'Year').replace('arm', 'Arm').replace('followup', 'FollowUp').replace('yArm','YArm')
             path_to_fs_data = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf')
 
@@ -642,9 +653,9 @@ class SaxiIcoDataset_MT(Dataset):
             for path in paths:
                 if not os.path.exists(path):
                     print(f'File {path} does not exist')
-                    return
 
             if not os.path.exists(sphere_vtk_path):
+                print(f'Converting {sphere_path} to {sphere_vtk_path}')
                 mris_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
                 subprocess.run(mris_command, shell=True)
             if not os.path.exists(wm_vtk_path):
@@ -671,16 +682,10 @@ class SaxiIcoDataset_MT(Dataset):
 
             face_features = torch.cat([torch.take(vf, faces_pid0) for vf in vertex_features.transpose(0, 1)], dim=-1)
 
-            verts_list.append(verts)
-            faces_list.append(faces)
-            vertex_features_list.append(vertex_features)
-            face_features_list.append(face_features)
-            Y_list.append(Y)
-       
-        # print("Before padding - verts_list sizes:", [verts.size() for verts in verts_list])
-        verts_list = pad_sequence(verts_list, batch_first=True, padding_value=0.0) 
-        # print("After padding - verts_list sizes:", [verts.size() for verts in verts_list])
-        faces_list = pad_sequence(faces_list, batch_first=True, padding_value=-1)
-        vertex_features_list = pad_sequence(vertex_features_list, batch_first=True, padding_value=0.0)
+            # dictionary to store the data : {Timepoint1 : [verts, faces, vertex_features, face_features, Y], Timepoint2 : [verts, faces, vertex_features, face_features, Y], ...}
+            key = "T" + str(timepoint_counter) + hemisphere
+            dico[key] = (verts, faces, vertex_features, face_features, Y)
 
-        return verts_list, faces_list, vertex_features_list, face_features_list, nb_timepoints, Y
+            timepoint_counter += 1
+
+        return dico
