@@ -17,7 +17,7 @@ from sklearn.utils import class_weight
 torch.set_float32_matmul_precision('high')
 
 
-from shapeaxi.saxi_dataset import SaxiDataModule, SaxiDataset, SaxiIcoDataModule_fs, SaxiIcoDataModule, SaxiIcoDataset_fs, SaxiIcoDataModule_MT
+from shapeaxi.saxi_dataset import SaxiDataModule, SaxiIcoDataModule, SaxiFreesurferDataModule, SaxiFreesurferMPDataModule
 from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 from shapeaxi import saxi_nets
 from shapeaxi.saxi_nets import MonaiUNet, SaxiIcoClassification
@@ -163,7 +163,7 @@ def SaxiIcoClassification_fs_train(args, checkpoint_callback, mount_point, train
     val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
    
     #Creation of Dataset
-    brain_data = SaxiIcoDataModule_fs(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path,normalize_features=True)
+    brain_data = SaxiFreesurferDataModule(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path,normalize_features=True)
     df_train = pd.read_csv(train)
     unique_classes = np.sort(np.unique(df_train[args.class_column]))
     nb_classes = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column]))    
@@ -218,11 +218,11 @@ def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, ear
 
     elif args.nn == "SaxiRing":
         #Use of SaxiRing
-        data = SaxiIcoDataModule_fs(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
+        data = SaxiFreesurferDataModule(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
     
     else:
         #Use of SaxiRingMT
-        data = SaxiIcoDataModule_MT(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
+        data = SaxiFreesurferMPDataModule(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
 
     
     saxi_args['out_classes'] = len(nb_classes)  

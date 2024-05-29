@@ -1554,6 +1554,7 @@ class SaxiRing(pl.LightningModule):
 #                                                                                                                                                                                   #
 #####################################################################################################################################################################################
 
+
 class SaxiRingClassification(pl.LightningModule):
     # Saxi classification network
     def __init__(self, **kwargs):
@@ -1732,7 +1733,6 @@ class SaxiRingClassification(pl.LightningModule):
 #                                                                                SaxiRing Multiple TimePoints                                                                       #
 #                                                                                                                                                                                   #
 #####################################################################################################################################################################################
-
 
 
 class SaxiRingMT(pl.LightningModule):

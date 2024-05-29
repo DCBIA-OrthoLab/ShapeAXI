@@ -280,12 +280,12 @@ class SaxiIcoDataModule(pl.LightningDataModule):
 
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #
-#                                                                              IcoConv Freesurfer                                                                                   #
+#                                                                              Ring Freesurfer                                                                                      #
 #                                                                                                                                                                                   #
 #####################################################################################################################################################################################
 
 
-class SaxiIcoDataset_fs(Dataset):
+class SaxiFreesurferDataset(Dataset):
     def __init__(self,df,transform = None,version=None,name_class ='fsqc_qc',freesurfer_path=None):
         self.df = df
         self.transform = transform
@@ -396,7 +396,7 @@ class SaxiIcoDataset_fs(Dataset):
         return verts, faces, vertex_features, face_features, Y
 
 
-class SaxiIcoDataModule_fs(pl.LightningDataModule):
+class SaxiFreesurferDataModule(pl.LightningDataModule):
     def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 
@@ -430,9 +430,9 @@ class SaxiIcoDataModule_fs(pl.LightningDataModule):
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = SaxiIcoDataset_fs(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.val_dataset = SaxiIcoDataset_fs(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.test_dataset = SaxiIcoDataset_fs(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.train_dataset = SaxiFreesurferDataset(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.val_dataset = SaxiFreesurferDataset(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.test_dataset = SaxiFreesurferDataset(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
 
     def pad_verts_faces(self, batch):
         verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
@@ -471,10 +471,13 @@ class SaxiIcoDataModule_fs(pl.LightningDataModule):
 
 
 #####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                    Ring Freesurfer with multiple timepoints                                                                       #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
 
 
-
-class SaxiIcoDataModule_MT(pl.LightningDataModule):
+class SaxiFreesurferMPDataModule(pl.LightningDataModule):
     def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 
@@ -509,9 +512,9 @@ class SaxiIcoDataModule_MT(pl.LightningDataModule):
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = SaxiIcoDataset_MT(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.val_dataset = SaxiIcoDataset_MT(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.test_dataset = SaxiIcoDataset_MT(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.train_dataset = SaxiRingMTDataset(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.val_dataset = SaxiRingMTDataset(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.test_dataset = SaxiRingMTDataset(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
     
     def pad_verts_faces_through_timepoints(self, batch):
         padded_batch = {}
@@ -566,8 +569,7 @@ class SaxiIcoDataModule_MT(pl.LightningDataModule):
         return self.weights
 
 
-
-class SaxiIcoDataset_MT(Dataset):
+class SaxiFreesurferMPdataset(Dataset):
     def __init__(self,df,transform = None,version=None,name_class ='fsqc_qc',freesurfer_path=None):
         self.df = df
         self.transform = transform
@@ -655,7 +657,6 @@ class SaxiIcoDataset_MT(Dataset):
                     print(f'File {path} does not exist')
 
             if not os.path.exists(sphere_vtk_path):
-                print(f'Converting {sphere_path} to {sphere_vtk_path}')
                 mris_command = f'mris_convert {sphere_path} {sphere_vtk_path}'
                 subprocess.run(mris_command, shell=True)
             if not os.path.exists(wm_vtk_path):
