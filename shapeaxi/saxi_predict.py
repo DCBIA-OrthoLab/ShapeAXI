@@ -323,24 +323,24 @@ def SaxiFreedurferMT_predict(args, mount_point, df, fname, ext):,
                 probs.append(x)
                 predictions.append(torch.argmax(x, dim=1, keepdim=True))
 
-            probs = torch.cat(probs).detach().cpu().numpy()
-            predictions = torch.cat(predictions).cpu().numpy().squeeze()
+        probs = torch.cat(probs).detach().cpu().numpy()
+        predictions = torch.cat(predictions).cpu().numpy().squeeze()
 
-            out_dir = os.path.join(args.out, os.path.basename(args.model))
-            if not os.path.exists(out_dir):
-                os.makedirs(out_dir)
+        out_dir = os.path.join(args.out, os.path.basename(args.model))
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
 
-            out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
-            pickle.dump(probs, open(out_probs, 'wb'))
+        out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
+        pickle.dump(probs, open(out_probs, 'wb'))
 
-            df['pred'] = predictions
-            if ext == ".csv":
-                out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
-                df.to_csv(out_name, index=False)
-            else:
-                out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
-                df.to_parquet(out_name, index=False)
-            print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
+        df['pred'] = predictions
+        if ext == ".csv":
+            out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
+            df.to_csv(out_name, index=False)
+        else:
+            out_name = os.path.join(out_dir, fname.replace(ext, "_prediction.parquet"))
+            df.to_parquet(out_name, index=False)
+        print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
 
 
 def main(args):
