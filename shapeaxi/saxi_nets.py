@@ -7,22 +7,21 @@ import torchvision
 from torchvision import transforms
 import torchmetrics
 import monai
-from pytorch3d.structures import Meshes
-from pytorch3d.vis.plotly_vis import plot_scene
-import pytorch_lightning as pl
-from pytorch3d.vis.plotly_vis import plot_scene
+
 import plotly.express as px
-from sklearn.metrics import confusion_matrix
-from sklearn.metrics import classification_report
+
 import pandas as pd
 import cv2
+
+import pytorch_lightning as pl
+
+from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
-        FoVPerspectiveCameras, look_at_view_transform, look_at_rotation, 
+        FoVPerspectiveCameras, PerspectiveCameras, look_at_rotation, 
         RasterizationSettings, MeshRenderer, MeshRasterizer, MeshRendererWithFragments, BlendParams,
         SoftSilhouetteShader, HardPhongShader, SoftPhongShader, AmbientLights, PointLights, TexturesUV, TexturesVertex, TexturesAtlas
 )
-import requests
-from io import BytesIO
+
 import json
 import os
 
@@ -1592,9 +1591,9 @@ class SaxiRingClassification(pl.LightningModule):
         self.Drop = nn.Dropout(p=self.hparams.dropout_lvl)
         self.Classification = nn.Linear(self.ico_12.GetNumberOfPoints(), self.hparams.out_classes)  
 
-        cameras = FoVPerspectiveCameras()
+        cameras = PerspectiveCameras()
 
-        raster_settings = RasterizationSettings(image_size=self.hparams.image_size, blur_radius=0, faces_per_pixel=1,max_faces_per_bin=200000)        
+        raster_settings = RasterizationSettings(image_size=self.hparams.image_size, blur_radius=0, faces_per_pixel=1,max_faces_per_bin=None)        
         rasterizer = MeshRasterizer(cameras=cameras, raster_settings=raster_settings)
         lights = AmbientLights()
         self.renderer = MeshRenderer(rasterizer=rasterizer,shader=HardPhongShader(cameras=cameras, lights=lights))
@@ -1634,7 +1633,7 @@ class SaxiRingClassification(pl.LightningModule):
 
         for idx, v in enumerate(ico_verts):
             if (torch.abs(torch.sum(v)) == self.hparams.radius):
-                ico_verts[idx] = v + torch.normal(0.0, 1e-7, (3,))
+                ico_verts[idx] = v + torch.tensor([-1.2447e-05, -3.7212e-06, -1.5617e-06])
         
         self.register_buffer("ico_verts", ico_verts)
 
