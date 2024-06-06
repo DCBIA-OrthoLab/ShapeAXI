@@ -6,7 +6,7 @@ import os
 import math
 from collections import namedtuple
 
-from .utils import *
+from shapeaxi.utils import *
 
 # Command-line tool for processing and manipulating 3D surface mesh data using VTK library.
 

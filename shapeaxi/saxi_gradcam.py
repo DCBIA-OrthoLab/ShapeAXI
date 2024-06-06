@@ -19,9 +19,9 @@ from monai.transforms import (
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
-from . import saxi_nets, post_process as psp
-from .saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiIcoDataset_fs
-from .saxi_transforms import TrainTransform, EvalTransform, UnitSurfTransform, RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
+from shapeaxi import saxi_nets, post_process as psp
+from shapeaxi.saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiIcoDataset_fs
+from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, UnitSurfTransform, RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 
 # Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done.
 # Especially identify the parts of the picture which is the most important for the network to make a decision.

@@ -21,6 +21,7 @@ def get_best_checkpoint(checkpoint_dir):
 args = {"folds": 5,
         "csv": "Deg_classification_aggregate_long_exists.csv",
         "out": "train_output"}
+        
 args = Namespace(**args)
 
 
