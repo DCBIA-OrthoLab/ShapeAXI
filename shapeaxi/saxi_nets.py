@@ -1740,7 +1740,7 @@ class SaxiRingMT(pl.LightningModule):
         self.save_hyperparameters()
         self.y_pred = []
         self.y_true = []
-        self.timepoints = ['T1', 'T2', 'T3']
+
 
         # Create the icosahedrons form each level
         ico_12 = utils.CreateIcosahedron(self.hparams.radius) # 12 vertices
@@ -1794,7 +1794,7 @@ class SaxiRingMT(pl.LightningModule):
         self.Att = SelfAttention(self.hparams.hidden_dim, self.hparams.out_size, dim=2)
         
         # Final layer
-        self.Classification = nn.Linear(2*ico_12.GetNumberOfPoints(), self.hparams.out_classes)
+        self.Classification = nn.Linear(2*ico_12.GetNumberOfPoints()*3, self.hparams.out_classes) # 3 timepoints so *3
 
         #vAccuracy
         self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
@@ -1837,30 +1837,35 @@ class SaxiRingMT(pl.LightningModule):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
         return optimizer
 
-    def forward(self, x):
-        VL, FL, VFL, FFL, VR, FR, VFR, FFR = x
-        VL = VL.to(self.device,non_blocking=True)
-        FL = FL.to(self.device,non_blocking=True)
-        VFL = VFL.to(self.device,non_blocking=True)
-        FFL = FFL.to(self.device,non_blocking=True)
-        VR = VR.to(self.device,non_blocking=True)
-        FR = FR.to(self.device,non_blocking=True)
-        VFR = VFR.to(self.device,non_blocking=True)
-        FFR = FFR.to(self.device,non_blocking=True)
-        # TimeDistributed
-        xL = self.get_features(VL,FL,VFL,FFL,'L')
-        xR = self.get_features(VR,FR,VFR,FFR,'R')
-        xL, scoreL = self.down1(xL)
-        xL, scoreL = self.down2(xL)
-        xR, scoreR = self.down1(xR)
-        xR, scoreR = self.down2(xR)
+
+    def forward(self, x):  
+        T1L, T2L, T3L, T1R, T2R, T3R = x
+        
+        all_xL = []
+        all_xR = []
+
+        # Process right timepoints
+        for V, F, VF, FF in [T1L, T2L, T3L]:
+            xL, scoreL = self.get_features(V, F, VF, FF, 'L')
+            all_xL.append(xL)
+
+        # Process right timepoints
+        for V, F, VF, FF in [T1R, T2R, T3R]:
+            xR, scoreR = self.get_features(V, F, VF, FF, 'R')
+            all_xR.append(xR)
+
+        xL = torch.cat(all_xL, dim=1)  # Output shape is (batch, 12*3, features)
+        xR = torch.cat(all_xR, dim=1)
+
         # Add attention layer
         valuesL = self.W(xL)
         valuesR = self.W(xR)
-        xL, score = self.Att(xL,valuesL)
-        xR, score = self.Att(xR,valuesR)
-        l_left_right = [xL,xR]
-        x = torch.cat(l_left_right,dim=1)
+        xL, score = self.Att(xL, valuesL)  # Output shape is (batch, features)
+        xR, score = self.Att(xR, valuesR) 
+
+        l_left_right = [xL, xR]
+        x = torch.cat(l_left_right, dim=1)  # Output shape is (batch, 2*features)
+
         # Last classification layer
         x = self.drop(x)
         x = self.Classification(x)
@@ -1871,7 +1876,9 @@ class SaxiRingMT(pl.LightningModule):
     def get_features(self,V,F,VF,FF,side):
         x, PF = self.render(V,F,VF,FF)  
         x = getattr(self, f'TimeDistributed{side}')(x)
-        return x
+        x, score = self.down1(x) # Output shape is (batch, 42, features)
+        x, score = self.down2(x) # Output shape is (batch, 12, features)
+        return x, score
 
 
     def render(self,V,F,VF,FF):
@@ -1896,48 +1903,63 @@ class SaxiRingMT(pl.LightningModule):
 
 
     def training_step(self, train_batch, batch_idx):
-        for timepoint in self.timepoints:
-            left_side = f'{timepoint}L'
-            right_side = f'{timepoint}R'
-            VL, FL, VFL, FFL, Y = train_batch[left_side]
-            VR, FR, VFR, FFR, Y = train_batch[right_side]
-            x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-            loss = self.loss_train(x,Y)
-            self.log('train_loss', loss) 
-            predictions = torch.argmax(x, dim=1, keepdim=True)
-            self.train_accuracy(predictions, Y.reshape(-1, 1))
-            self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)        
-            return loss
+        # Unpack the batch
+        T1L = train_batch['T1L']
+        T2L = train_batch['T2L']
+        T3L = train_batch['T3L']
+        T1R = train_batch['T1R']
+        T2R = train_batch['T2R']
+        T3R = train_batch['T3R']
+        Y = train_batch['Y']
+
+        x = self((T1L, T2L, T3L, T1R, T2R, T3R))
+
+        loss = self.loss_train(x, Y)
+        self.log('train_loss', loss)
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        self.train_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        # Unpack the batch
+        T1L = val_batch['T1L']
+        T2L = val_batch['T2L']
+        T3L = val_batch['T3L']
+        T1R = val_batch['T1R']
+        T2R = val_batch['T2R']
+        T3R = val_batch['T3R']
+        Y = val_batch['Y']
+
+        # Forward pass
+        x = self((T1L, T2L, T3L, T1R, T2R, T3R))
+        # Compute loss
+        loss = self.loss_val(x, Y)
+        self.log('val_loss', loss)
+        # Calculate predictions and accuracy
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
+        
+        return val_acc
 
 
-    def validation_step(self,val_batch,batch_idx):
-        for timepoint in self.timepoints:
-            left_side = f'{timepoint}L'
-            right_side = f'{timepoint}R'
-            VL, FL, VFL, FFL, Y = val_batch[left_side]
-            VR, FR, VFR, FFR, Y = val_batch[right_side]
-            x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-            loss = self.loss_val(x,Y)
-            self.log('val_loss', loss)
-            predictions = torch.argmax(x, dim=1, keepdim=True)
-            val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
-            self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
-            return val_acc
-
-
-    def test_step(self,test_batch,batch_idx):
-        for timepoint in self.timepoints:
-            left_side = f'{timepoint}L'
-            right_side = f'{timepoint}R'
-            VL, FL, VFL, FFL, Y = val_batch[left_side]
-            VR, FR, VFR, FFR, Y = val_batch[right_side]
-            x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
-            loss = self.loss_test(x,Y)
-            self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-            predictions = torch.argmax(x, dim=1, keepdim=True)
-            output = [predictions,Y]
-
-            return output
+    def test_step(self, test_batch, batch_idx):
+        # Unpack the batch
+        T1L = test_batch['T1L']
+        T2L = test_batch['T2L']
+        T3L = test_batch['T3L']
+        T1R = test_batch['T1R']
+        T2R = test_batch['T2R']
+        T3R = test_batch['T3R']
+        Y = test_batch['Y']
+        
+        x = self((T1L, T2L, T3L, T1R, T2R, T3R))
+        loss = self.loss_test(x, Y)
+        self.log('test_loss', loss, batch_size=self.hparams.batch_size)
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        output = [predictions, Y]
+        return output
 
 
     def test_epoch_end(self,input_test):
@@ -1969,3 +1991,6 @@ class SaxiRingMT(pl.LightningModule):
 
     def Is_it_Icolayer(self,layer):
         return (layer[:3] == 'Ico')
+
+
+
