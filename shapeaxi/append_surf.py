@@ -35,7 +35,7 @@ def main():
             append_filter.Update()
 
             # Write the result to a file
-            utils.WriteSurf(append_filter.GetOutput(), os.path.append(args.out, name + args.out_ext))
+            utils.WriteSurf(append_filter.GetOutput(), os.path.join(args.out, name + args.out_ext))
             
     else:
         # Create an append filter
