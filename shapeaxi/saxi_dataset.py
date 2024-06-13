@@ -5,7 +5,10 @@ import os
 import torch
 import subprocess
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence as pack_sequence, pad_packed_sequence as unpack_sequence
-import pytorch_lightning as pl
+
+import lightning as L
+from lightning.pytorch.core import LightningDataModule
+
 from torchvision import transforms
 import sys
 from vtk.util.numpy_support import vtk_to_numpy
@@ -40,13 +43,14 @@ from shapeaxi import utils
 class SaxiDataset(Dataset):
     #This class is designed to make it easier to work with 3D surface data stored in files
     #It provides methods for loading and preprocessing the data and allows for flexible configurations depending on the specific use case
-    def __init__(self, df, mount_point="./", transform=None, surf_column="surf", surf_property=None, class_column=None, scalar_column=None, **kwargs):
+    def __init__(self, df, mount_point="./", transform=None, surf_column="surf", surf_property=None, class_column=None, scalar_column=None, CN=True, **kwargs):
         self.df = df
         self.mount_point = mount_point
         self.transform = transform
         self.surf_column = surf_column
         self.surf_property = surf_property
         self.class_column = class_column
+        self.CN = CN
 
     def __len__(self):
         return len(self.df.index)
@@ -57,11 +61,12 @@ class SaxiDataset(Dataset):
 
         if self.transform:
             surf = self.transform(surf)
-    
-        surf = utils.ComputeNormals(surf)
-        color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
-        verts = utils.PolyDataToTensors(surf)[0]
-        faces = utils.PolyDataToTensors(surf)[1]
+
+        verts, faces = utils.PolyDataToTensors_v_f(surf)
+
+        if self.CN:
+            surf = utils.ComputeNormals(surf)
+            color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
 
         if self.surf_property:            
             faces_pid0 = faces[:,0:1]
@@ -69,22 +74,31 @@ class SaxiDataset(Dataset):
             surf_point_data = torch.tensor(vtk_to_numpy(surf_point_data)).to(torch.float32)            
             surf_point_data_faces = torch.take(surf_point_data, faces_pid0)            
             surf_point_data_faces[surf_point_data_faces==-1] = 33            
-            return verts, faces, surf_point_data_faces, color_normals
+
+            if self.CN:                
+                return verts, faces, surf_point_data_faces, color_normals
+            
+            return verts, faces, surf_point_data_faces
 
         if self.class_column:
             cl = torch.tensor(self.df.iloc[idx][self.class_column], dtype=torch.int64)
-            return verts, faces, color_normals, cl
+            if self.CN:
+                return verts, faces, color_normals, cl
+            else:
+                return verts, faces, cl
 
-        return verts, faces, color_normals
+        if self.CN:
+            return verts, faces, color_normals
+        return verts, faces
 
     def getSurf(self, idx):
         surf_path = os.path.join(self.mount_point, self.df.iloc[idx][self.surf_column])
         return utils.ReadSurf(surf_path)
 
 
-class SaxiDataModule(pl.LightningDataModule):
+class SaxiDataModule(LightningDataModule):
     #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
-    def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column='Classification', model='SaxiClassification', surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
+    def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column=None , surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
         super().__init__()
         self.df_train = df_train
         self.df_val = df_val   
@@ -100,7 +114,6 @@ class SaxiDataModule(pl.LightningDataModule):
         self.valid_transform = valid_transform
         self.test_transform = test_transform
         self.drop_last = drop_last
-        self.model = model
 
     def setup(self, stage=None):
         # Assign train/val datasets for use in dataloaders
@@ -110,17 +123,66 @@ class SaxiDataModule(pl.LightningDataModule):
 
     def pad_verts_faces(self, batch):
         # Collate function for the dataloader to know how to comine the data
-        verts = [v for v, f, cn, l in batch]
-        faces = [f for v, f, cn, l in batch]        
-        color_normals = [cn for v, f, cn, l in batch]
-        labels = [l for v, f, cn, l in batch]  
+        if self.class_column:
+            verts = [v for v, f, cn, l in batch]
+            faces = [f for v, f, cn, l in batch]        
+            color_normals = [cn for v, f, cn, l in batch]
+            labels = [l for v, f, cn, l in batch]  
+            
+            verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
+            faces = pad_sequence(faces, batch_first=True, padding_value=-1)        
+            color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)
+            labels = torch.tensor(labels)
+            
+            return verts, faces, color_normals, labels
+        else:
+            verts = [v for v, f, cn in batch]
+            faces = [f for v, f, cn in batch]        
+            color_normals = [cn for v, f, cn in batch]            
+            
+            verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
+            faces = pad_sequence(faces, batch_first=True, padding_value=-1)        
+            color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)            
+            
+            return verts, faces, color_normals
+        
+
+class SaxiDataModuleVF(LightningDataModule):
+    #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
+    def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column=None , surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
+        super().__init__()
+        self.df_train = df_train
+        self.df_val = df_val   
+        self.df_test = df_test     
+        self.mount_point = mount_point
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.surf_column = surf_column
+        self.class_column = class_column
+        self.scalar_column = scalar_column
+        self.surf_property = surf_property        
+        self.train_transform = train_transform
+        self.valid_transform = valid_transform
+        self.test_transform = test_transform
+        self.drop_last = drop_last
+
+    def setup(self, stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_ds = SaxiDataset(self.df_train, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.train_transform, CN=False)
+        self.val_ds = SaxiDataset(self.df_val, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.valid_transform, CN=False)
+        self.test_ds = SaxiDataset(self.df_test, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.test_transform, CN=False)
+
+    def pad_verts_faces(self, batch):
+        # Collate function for the dataloader to know how to comine the data
+        
+        verts = [v for v, f  in batch]
+        faces = [f for v, f in batch]
         
         verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
-        faces = pad_sequence(faces, batch_first=True, padding_value=-1)        
-        color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)
-        labels = torch.tensor(labels)
-        
-        return verts, faces, color_normals, labels
+        faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+            
+        return verts, faces
+
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
@@ -208,7 +270,7 @@ class SaxiIcoDataset(Dataset):
         return verts, faces,vertex_features,face_features,demographic, Y
 
 
-class SaxiIcoDataModule(pl.LightningDataModule):
+class SaxiIcoDataModule(LightningDataModule):
     def __init__(self,batch_size,list_demographic,data_train,data_val,data_test,list_path_ico,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='ASD_administered'):
         super().__init__()
         self.batch_size = batch_size 
@@ -396,7 +458,7 @@ class SaxiFreesurferDataset(Dataset):
         return verts, faces, vertex_features, face_features, Y
 
 
-class SaxiFreesurferDataModule(pl.LightningDataModule):
+class SaxiFreesurferDataModule(LightningDataModule):
     def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 
@@ -477,7 +539,7 @@ class SaxiFreesurferDataModule(pl.LightningDataModule):
 #####################################################################################################################################################################################
 
 
-class SaxiFreesurferMPDataModule(pl.LightningDataModule):
+class SaxiFreesurferMPDataModule(LightningDataModule):
     def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 

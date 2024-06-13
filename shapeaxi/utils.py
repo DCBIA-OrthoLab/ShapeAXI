@@ -113,7 +113,7 @@ class LinearSubdivisionFilter:
             # Return the subdivied polydata
             self.Output = subdiv_poly
 
-def normalize_points(poly, radius):
+def normalize_points(poly, radius=1.0):
     polypoints = poly.GetPoints()
     for pid in range(polypoints.GetNumberOfPoints()):
         spoint = polypoints.GetPoint(pid)
@@ -151,6 +151,15 @@ def CreateIcosahedronSubdivided(radius, sl):
     subdivfilter = normalize_points(subdivfilter, radius)
 
     return subdivfilter
+
+def IcoSphere(level):
+    ico_sphere = CreateIcosahedron(1.0)
+    subdivfilter = vtk.vtkLinearSubdivisionFilter()
+    subdivfilter.SetInputData(ico_sphere)
+    subdivfilter.SetNumberOfSubdivisions(level)
+    subdivfilter.Update()
+    ico_sphere = normalize_points(subdivfilter.GetOutput())
+    return ico_sphere
 
 def SubdividedIcosahedron(mesh, subdivisions, radius):
     subdivfilter = LinearSubdivisionFilter()
@@ -242,8 +251,8 @@ def CreatePlane(Origin,Point1,Point2,Resolution):
 
 def ReadSurf(fileName):
 
-    fname, extension = os.path.splitext(fileName)
-    extension = extension.lower()
+    fname, extension = os.path.splitext(fileName)    
+    extension = extension.lower()    
     if extension == ".vtk":
         reader = vtk.vtkPolyDataReader()
         reader.SetFileName(fileName)
@@ -1043,6 +1052,17 @@ def json2vtk(jsonfile,number_landmarks,radius_sphere,outdir):
         output = os.path.join(outdir, filename)
         Write(vtk_landmarks.GetOutput(), output)
     return output
+
+def SmoothPolyData(surf, iterations=15, relaxation_factor=0.1):
+    smoothFilter = vtk.vtkSmoothPolyDataFilter()
+    smoothFilter.SetInputData(surf)
+    smoothFilter.SetNumberOfIterations(iterations)
+    smoothFilter.SetRelaxationFactor(relaxation_factor)
+    smoothFilter.FeatureEdgeSmoothingOff()
+    smoothFilter.BoundarySmoothingOn()
+    smoothFilter.Update()
+    surf = smoothFilter.GetOutput()
+    return surf
     
 def ArrayToTensor(vtkarray, device='cpu', dtype=torch.int64):
     return ToTensor(dtype=dtype, device=device)(vtk_to_numpy(vtkarray))
@@ -1051,9 +1071,9 @@ def PolyDataToTensors(surf, device='cpu'):
 
     verts, faces, edges = PolyDataToNumpy(surf)
     
-    verts = torch.tensor(verts).to(torch.float32)
-    faces = torch.tensor(faces).to(torch.int64)
-    edges = torch.tensor(edges).to(torch.int64)
+    verts = torch.tensor(verts).to(torch.float32).to(device)
+    faces = torch.tensor(faces).to(torch.int64).to(device)
+    edges = torch.tensor(edges).to(torch.int64).to(device)
     
     return verts, faces, edges
 
@@ -1075,8 +1095,8 @@ def PolyDataToTensors_v_f(surf, device='cpu'):
 
     verts, faces, = PolyDataToNumpy_v_f(surf)
     
-    verts = torch.tensor(verts)
-    faces = torch.tensor(faces)
+    verts = torch.tensor(verts).to(torch.float32).to(device)
+    faces = torch.tensor(faces).to(torch.int64).to(device)
     
     return verts, faces
 
@@ -1087,6 +1107,40 @@ def PolyDataToNumpy_v_f(surf):
     faces = vtk_to_numpy(surf.GetPolys().GetData()).reshape(-1, 4)[:,1:]
     
     return verts, faces
+
+
+def TensorToPolyData(verts, faces):
+    
+    """
+    Converts a tensor of vertices and faces into a VTK PolyData object.
+
+    Parameters:
+    - verts: A NumPy array or a tensor containing the vertices (shape: [n_verts, 3]).
+    - faces: A NumPy array or a tensor containing the faces (each face is a list of indices into the verts array).
+
+    Returns:
+    - vtkPolyData object
+    """
+    # Create a VTK points object
+    points = vtk.vtkPoints()
+    for vert in verts:
+        points.InsertNextPoint(vert[0], vert[1], vert[2])
+
+    # Create a VTK Polygon data structure
+    polygons = vtk.vtkCellArray()
+    for face in faces:
+        polygon = vtk.vtkPolygon()
+        polygon.GetPointIds().SetNumberOfIds(len(face))
+        for i, vert_id in enumerate(face):
+            polygon.GetPointIds().SetId(i, vert_id)
+        polygons.InsertNextCell(polygon)
+
+    # Create a PolyData object
+    polyData = vtk.vtkPolyData()
+    polyData.SetPoints(points)
+    polyData.SetPolys(polygons)
+
+    return polyData
 
 def UnitVerts(verts):
     min_verts, _ = torch.min(verts, axis=0)

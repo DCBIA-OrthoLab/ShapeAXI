@@ -8,89 +8,38 @@ from torchvision import transforms
 import torchmetrics
 import monai
 
-import plotly.express as px
-
 import pandas as pd
-import cv2
 
 import pytorch_lightning as pl
 
-from pytorch3d.structures import Meshes
+from pytorch3d.structures import (
+    Meshes,
+    Pointclouds)
 from pytorch3d.renderer import (
         FoVPerspectiveCameras, PerspectiveCameras, look_at_rotation, 
-        RasterizationSettings, MeshRenderer, MeshRasterizer, MeshRendererWithFragments, BlendParams,
-        SoftSilhouetteShader, HardPhongShader, SoftPhongShader, AmbientLights, PointLights, TexturesUV, TexturesVertex, TexturesAtlas
+        RasterizationSettings, MeshRenderer, MeshRasterizer, MeshRendererWithFragments,
+        HardPhongShader, AmbientLights, TexturesVertex
+)
+from pytorch3d.ops import (sample_points_from_meshes,
+                           knn_points, 
+                           knn_gather)
+
+from pytorch3d.loss import (
+    chamfer_distance,
+    point_mesh_edge_distance, 
+    point_mesh_face_distance
 )
 
 import json
 import os
 
 from shapeaxi import utils
-from shapeaxi.IcoConcOperator import IcosahedronConv1d, IcosahedronConv2d, IcosahedronLinear
-from shapeaxi.saxi_transforms import GaussianNoise, MaxPoolImages, AvgPoolImages, Identity, TimeDistributed
+from shapeaxi.saxi_layers import IcosahedronConv2d, TimeDistributed, SelfAttention, Residual, FeedForward, MHA, TimeDistributed, UnpoolMHA, SmoothAttention, SmoothMHA
+from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
 from shapeaxi.colors import bcolors
 
-
-class ProjectionHead(nn.Module):
-    # Projection MLP
-    def __init__(self, input_dim=1280, hidden_dim=1280, output_dim=128):
-        super().__init__()
-        self.output_dim = output_dim
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-
-        self.model = nn.Sequential(
-            nn.Linear(self.input_dim, self.hidden_dim),
-            nn.BatchNorm1d(self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.output_dim, bias=False)
-        )
-
-    def forward(self, x):
-        x_v = self.model(x)
-        return x, x_v
-
-
-class TimeDistributed(nn.Module):
-    # Wrapper to apply a module to each time step of a sequence
-    def __init__(self, module):
-        super(TimeDistributed, self).__init__()
-        self.module = module
- 
-    def forward(self, input_seq):
-        assert len(input_seq.size()) > 2
- 
-        # reshape input data --> (samples * timesteps, input_size)
-        # squash timesteps
-
-        size = input_seq.size()
-        batch_size = size[0]
-        time_steps = size[1]
-        size_reshape = [batch_size*time_steps] + list(size[2:])
-        reshaped_input = input_seq.contiguous().view(size_reshape)
-        output = self.module(reshaped_input)
-        output_size = output.size()
-        output_size = [batch_size, time_steps] + list(output_size[1:])
-        output = output.contiguous().view(output_size)
-
-        return output
-
-
-class SelfAttention(nn.Module):
-    # Self attention layer
-    def __init__(self, in_units, out_units, dim=1):
-        super().__init__()
-        self.W1 = nn.Linear(in_units, out_units)
-        self.V = nn.Linear(out_units, 1)
-        self.dim = dim
-
-    def forward(self, query, values):        
-        score = nn.Sigmoid()(self.V(nn.Tanh()(self.W1(query))))
-        attention_weights = score/torch.sum(score, dim=self.dim,keepdim=True)
-        context_vector = attention_weights * values
-        context_vector = torch.sum(context_vector, dim=self.dim)
-        return context_vector, score
-
+import lightning as L
+from lightning.pytorch.core import LightningModule
 
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #
@@ -99,7 +48,7 @@ class SelfAttention(nn.Module):
 #####################################################################################################################################################################################
 
 
-class SaxiClassification(pl.LightningModule):
+class SaxiClassification(LightningModule):
     # Saxi classification network
     def __init__(self, **kwargs):
         super(SaxiClassification, self).__init__()
@@ -233,7 +182,7 @@ class SaxiClassification(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class SaxiRegression(pl.LightningModule):
+class SaxiRegression(LightningModule):
     # Saxi regression network
     def __init__(self, **kwargs):
 
@@ -372,7 +321,7 @@ class SaxiRegression(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class MonaiUNet(pl.LightningModule):
+class MonaiUNet(LightningModule):
     # Monai UNet network
     def __init__(self, args = None, out_channels=3, class_weights=None, image_size=320, radius=1.35, subdivision_level=1, train_sphere_samples=4):
 
@@ -526,7 +475,7 @@ class MonaiUNet(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class SaxiIcoClassification(pl.LightningModule):
+class SaxiIcoClassification(LightningModule):
     def __init__(self, **kwargs):
         super(SaxiIcoClassification, self).__init__()
         self.save_hyperparameters()
@@ -795,7 +744,7 @@ class SaxiIcoClassification(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class SaxiIcoClassification_fs(pl.LightningModule):
+class SaxiIcoClassification_fs(LightningModule):
     def __init__(self, **kwargs):
         super(SaxiIcoClassification_fs, self).__init__()
         self.save_hyperparameters()
@@ -1016,7 +965,7 @@ class SaxiIcoClassification_fs(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class SaxiSegmentation(pl.LightningModule):
+class SaxiSegmentation(LightningModule):
     # Saxi segmentation network
     def __init__(self, args = None, out_channels=3, class_weights=None, image_size=320, radius=1.35, subdivision_level=1, train_sphere_samples=4):
         super(SaxiSegmentation, self).__init__()        
@@ -1151,7 +1100,7 @@ class SaxiSegmentation(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class DentalModelSeg(pl.LightningModule):
+class DentalModelSeg(LightningModule):
     def __init__(self, image_size=320, radius=1.35, subdivision_level=2, train_sphere_samples=4, custom_model=None, device='cuda:0'):
         super(DentalModelSeg, self).__init__()        
         self.save_hyperparameters()        
@@ -1317,7 +1266,7 @@ class AttentionRings(nn.Module):
         return context_vector, score
 
 
-class SaxiRing(pl.LightningModule):
+class SaxiRing(LightningModule):
     def __init__(self, **kwargs):
         super(SaxiRing, self).__init__()
         self.save_hyperparameters()
@@ -1554,7 +1503,7 @@ class SaxiRing(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class SaxiRingClassification(pl.LightningModule):
+class SaxiRingClassification(LightningModule):
     # Saxi classification network
     def __init__(self, **kwargs):
         super(SaxiRingClassification, self).__init__()
@@ -1734,7 +1683,7 @@ class SaxiRingClassification(pl.LightningModule):
 #####################################################################################################################################################################################
 
 
-class SaxiRingMT(pl.LightningModule):
+class SaxiRingMT(LightningModule):
     def __init__(self, **kwargs):
         super(SaxiRingMT, self).__init__()
         self.save_hyperparameters()
@@ -1969,3 +1918,244 @@ class SaxiRingMT(pl.LightningModule):
 
     def Is_it_Icolayer(self,layer):
         return (layer[:3] == 'Ico')
+
+class SaxiMHAEncoder(nn.Module):
+    def __init__(self, input_dim=3, embed_dim=128, num_heads=4, K=6, output_dim=256, sample_levels=[40962, 10242, 2562, 642, 162], hidden_dim=64, dropout=0.1, return_sorted=False):
+        super(SaxiMHAEncoder, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.K = K
+        self.sample_levels = sample_levels
+        self.hidden_dim = hidden_dim
+        self.dropout = dropout
+        self.return_sorted = return_sorted
+
+        self.embedding = nn.Linear(input_dim, embed_dim)
+
+        for i, N in enumerate(sample_levels):
+            mha = MHA(embed_dim, num_heads, dropout)
+            mha_td = TimeDistributed(mha)
+            setattr(self, f'mha_td{i}', mha_td)
+            setattr(self, f'residual_mha_td{i}', Residual(mha_td, dimension=embed_dim))
+
+            ff = FeedForward(embed_dim, hidden_dim, dropout)
+            setattr(self, f'ff{i}', ff)
+            setattr(self, f'residual_ff{i}', Residual(ff, dimension=embed_dim))
+        
+        self.attn = SelfAttention(embed_dim, embed_dim, dim=2)
+        self.output = nn.Linear(embed_dim, output_dim)
+    
+    def sample_points(self, x, Ns):
+        """
+        Samples Ns points from each batch in a tensor of shape (Bs, N, F).
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (Bs, N, F).
+            Ns (int): Number of points to sample from each batch.
+
+        Returns:
+            torch.Tensor: Output tensor of shape (Bs, Ns, F).
+        """
+        Bs, N, F = x.shape
+
+        # Generate random indices for sampling
+        indices = torch.randint(low=0, high=N, size=(Bs, Ns), device=x.device).unsqueeze(-1)
+
+        # Gather the sampled points
+        x = knn_gather(x, indices).squeeze(-2).contiguous()
+
+        return x, indices
+    
+    def sample_points_from_meshes(self, x_mesh, Ns):
+        return sample_points_from_meshes(x_mesh, Ns)
+        
+    def forward(self, x_mesh):
+
+        x_sampled = self.sample_points_from_meshes(x_mesh, self.sample_levels[0])
+
+        x = self.embedding(x_sampled)
+        
+        for i, sl in enumerate(self.sample_levels):
+            
+            if i > 0: # this is the pooling operation. First, sample points from the current set of samples. Gather the points from the previous layer and then pass them through the MHA and FF layers.
+                x_sampled, idx = self.sample_points(x_sampled, sl)
+                x = knn_gather(x, idx).squeeze(-2).contiguous()
+
+            # find closest points to self, i.e., each point in the sample finds the closest K points in the sample Does not sort by distance (assuming sorted by index?)
+            dists = knn_points(x_sampled, x_sampled, K=self.K, return_sorted=self.return_sorted)
+            x = knn_gather(x, dists.idx)
+
+            x = getattr(self, f'residual_mha_td{i}')(x) # shape is BS, N, K, F
+            x = getattr(self, f'residual_ff{i}')(x)
+            ## reduce x in the K dim 
+            x, x_s = self.attn(x, x)
+            
+        x = self.output(x)
+        return x
+    
+
+class SaxiMHADecoder(nn.Module):
+    def __init__(self, input_dim=256, L=4, embed_dim=128, output_dim=3, num_heads=4,  K=4, hidden_dim=64, dropout=0.1, return_sorted=True):
+        super(SaxiMHADecoder, self).__init__()
+
+        self.input_dim = input_dim
+        self.L = L
+        self.K = K
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads        
+        self.hidden_dim = hidden_dim
+        self.dropout = dropout
+        self.return_sorted = return_sorted
+
+        self.embedding = nn.Linear(input_dim, embed_dim)
+
+        self.unpool = UnpoolMHA()
+
+        for i in range(self.L):
+            mha = MHA(embed_dim, num_heads, dropout)
+            mha_td = TimeDistributed(mha)
+            setattr(self, f'mha_td{i}', mha_td)
+            setattr(self, f'residual_mha_td{i}', Residual(mha_td, dimension=embed_dim))
+
+            ff = FeedForward(embed_dim, hidden_dim, dropout)
+            setattr(self, f'ff{i}', ff)
+            setattr(self, f'residual_ff{i}', Residual(ff, dimension=embed_dim))
+        
+        self.output = nn.Linear(embed_dim, output_dim)
+    
+    def sample_points(self, x, Ns):
+        """
+        Samples Ns points from each batch in a tensor of shape (Bs, N, F).
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (Bs, N, F).
+            Ns (int): Number of points to sample from each batch.
+
+        Returns:
+            torch.Tensor: Output tensor of shape (Bs, Ns, F).
+        """
+        Bs, N, F = x.shape
+
+        # Generate random indices for sampling
+        indices = torch.randint(low=0, high=N, size=(Bs, Ns), device=x.device).unsqueeze(-1)
+
+        # Gather the sampled points
+        x = knn_gather(x, indices).squeeze(-2).contiguous()
+
+        return x, indices
+        
+    def forward(self, x):
+        
+        x = self.embedding(x)
+
+        for i in range(self.L):
+
+            # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
+            # dists = knn_points(x_sampled, x_sampled, K=6)
+            dists = knn_points(x, x, K=self.K, return_sorted=self.return_sorted)
+            x = knn_gather(x, dists.idx)
+
+            x = getattr(self, f'residual_mha_td{i}')(x)
+            x = getattr(self, f'residual_ff{i}')(x)
+            ## reduce x in the time dim
+            x = self.unpool(x)
+            
+        x = self.output(x)
+        return x
+    
+
+class SaxiAE(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = SaxiMHAEncoder(input_dim=self.hparams.input_dim, 
+                                      embed_dim=self.hparams.embed_dim, 
+                                      num_heads=self.hparams.num_heads, 
+                                      output_dim=self.hparams.output_dim, 
+                                      sample_levels=self.hparams.sample_levels, 
+                                      hidden_dim=self.hparams.hidden_dim, 
+                                      dropout=self.hparams.dropout, 
+                                      K=self.hparams.K_encoder)
+        
+        self.decoder = SaxiMHADecoder(input_dim=self.hparams.output_dim, 
+                                      L=len(self.hparams.sample_levels), 
+                                      embed_dim=self.hparams.embed_dim, 
+                                      output_dim=self.hparams.input_dim, 
+                                      num_heads=self.hparams.num_heads, 
+                                      K=self.hparams.K_decoder, 
+                                      hidden_dim=self.hparams.hidden_dim, 
+                                      dropout=self.hparams.dropout)
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiAE")
+
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
+        
+        # Encoder parameters
+        
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=128, help='Embedding dimension')
+        group.add_argument("--num_heads", type=int, default=8, help='Number of attention heads')
+        group.add_argument("--output_dim", type=int, default=1024, help='Output dimension from the encoder')
+        group.add_argument("--sample_levels", type=int, default=[10242, 2562, 642], nargs="+", help='Number of sampling levels in the encoder')
+        group.add_argument("--hidden_dim", type=int, default=64, help='Hidden dimension size')
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        
+        # Decoder parameters
+        group.add_argument("--K_encoder", type=int, default=8, help='Top K nearest neighbors to consider in the encoder')
+        group.add_argument("--K_decoder", type=int, default=4, help='Top K nearest neighbors to consider in the decoder steps')
+        group.add_argument("--loss_chamfer_weight", type=float, default=1.0, help='Loss weight for the chamfer distance')
+        group.add_argument("--loss_mesh_face_weight", type=float, default=1.0, help='Loss weight for the mesh face distance')
+        group.add_argument("--loss_mesh_edge_weight", type=float, default=.001, help='Loss weight for the mesh edge distance')
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(list(self.encoder.parameters()) + list(self.decoder.parameters()),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+
+    def compute_loss(self, X_mesh, X_hat):
+        # We compare the two sets of pointclouds by computing (a) the chamfer loss
+        X = sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X_hat = Pointclouds(X_hat)
+        loss_chamfer, _ = chamfer_distance(X, X_hat)
+        loss_point_mesh_face = point_mesh_face_distance(X_mesh, X_hat)
+        loss_point_mesh_edge = point_mesh_edge_distance(X_mesh, X_hat)
+
+        return loss_chamfer*self.hparams.loss_chamfer_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight
+
+    def training_step(self, train_batch, batch_idx):
+        V, F = train_batch
+        
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, z = self(X_mesh)
+        loss = self.compute_loss(X_mesh, X_hat)
+        
+        self.log("train_loss", loss)        
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        V, F = val_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, z = self(X_mesh)
+
+        loss = self.compute_loss(X_mesh, X_hat)
+        
+        self.log("val_loss", loss, sync_dist=True)
+
+    def forward(self, X_mesh):        
+        z = self.encoder(X_mesh)
+        X_hat = self.decoder(z)
+        return X_hat, z
