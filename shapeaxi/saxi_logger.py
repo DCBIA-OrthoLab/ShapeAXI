@@ -1,8 +1,10 @@
-from pytorch_lightning.callbacks import Callback
+from lightning.pytorch.callbacks import Callback
 import torchvision
 import torch
 import matplotlib.pyplot as plt
-
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 # This file contains custom callbacks for logging and visualizing images during training within a PyTorch Lightning-based deep learning workflow
 
@@ -242,3 +244,61 @@ class SaxiImageLoggerNeptune_Ico_fs(Callback):
                 trainer.logger.experiment["images/x"].upload(fig)
                 plt.close()
 
+
+class SaxiAELoggerNeptune(Callback):
+    # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
+    def __init__(self, num_surf=1, log_steps=10):
+        self.log_steps = log_steps
+        self.num_surf = num_surf
+        self.num_samples = 1000
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
+        # This function is called at the end of each training batch
+        if batch_idx % self.log_steps == 0:
+
+            with torch.no_grad():
+                V, F = batch
+                X_mesh = pl_module.create_mesh(V, F)
+                X_hat, z = pl_module(X_mesh)
+
+                X_samples = pl_module.encoder.sample_points_from_meshes(X_mesh, self.num_samples)
+                X_samples_hat, _ = pl_module.encoder.sample_points(X_hat[0:1], self.num_samples)
+
+                fig = self.plot_pointclouds(X_samples[0].cpu().numpy(), X_samples_hat[0].detach().cpu().numpy())
+                trainer.logger.experiment["images/surf"].upload(fig)
+
+    
+    def plot_pointclouds(self, X, X_hat):
+    
+
+        fig = make_subplots(
+            rows=1, cols=2,
+            specs=[[{'type': 'scatter3d'}, {'type': 'scatter3d'}]]
+        )
+
+        # First scatter plot
+        fig.add_trace(
+            go.Scatter3d(x=X[:,0], y=X[:,1], z=X[:,2], mode='markers', marker=dict(
+                size=2,
+                color=X[:,2],                # set color to an array/list of desired values
+                colorscale='Viridis',   # choose a colorscale
+                opacity=0.8
+            )),
+            row=1, col=1
+        )
+
+        # Second scatter plot
+        fig.add_trace(
+            go.Scatter3d(x=X_hat[:,0], y=X_hat[:,1], z=X_hat[:,2], mode='markers', marker=dict(
+                size=2,
+                color=X_hat[:,2],                # set color to an array/list of desired values
+                colorscale='Viridis',   # choose a colorscale
+                opacity=0.8
+            )),
+            row=1, col=2
+        )
+
+        # Update the layout if necessary
+        fig.update_layout(height=600, width=1200, title_text="Side-by-Side 3D Scatter Plots")
+
+        return fig
