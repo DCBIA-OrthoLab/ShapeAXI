@@ -2159,3 +2159,84 @@ class SaxiAE(LightningModule):
         z = self.encoder(X_mesh)
         X_hat = self.decoder(z)
         return X_hat, z
+    
+
+class SaxiMHAClassification(LightningModule):
+    def __init__(self, **kwargs):
+        super(SaxiMHAClassification).__init__()
+        self.save_hyperparameters()
+
+        self.encoder = SaxiMHAEncoder(input_dim=self.hparams.input_dim, 
+                                      embed_dim=self.hparams.embed_dim, 
+                                      num_heads=self.hparams.num_heads, 
+                                      output_dim=self.hparams.output_dim, 
+                                      sample_levels=self.hparams.sample_levels, 
+                                      hidden_dim=self.hparams.hidden_dim, 
+                                      dropout=self.hparams.dropout, 
+                                      K=self.hparams.K)
+        
+        self.flatten = nn.Flatten(start_dim=1)
+        self.fc = nn.Linear(self.hparams.output_dim*self.hparams.sample_levels[-1], self.hparams.num_classes)
+        self.loss = nn.CrossEntropyLoss()
+        
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiAE")
+
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
+        
+        # Encoder parameters
+        
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=128, help='Embedding dimension')
+        group.add_argument("--num_heads", type=int, default=8, help='Number of attention heads')
+        group.add_argument("--output_dim", type=int, default=128, help='Output dimension from the encoder')
+        group.add_argument("--sample_levels", type=int, default=[10242, 2562, 642, 162, 42], nargs="+", help='Number of sampling levels in the encoder')
+        group.add_argument("--hidden_dim", type=int, default=64, help='Hidden dimension size')
+        group.add_argument("--K", type=int, default=8, help='Top K nearest neighbors to consider in the encoder')
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        
+        # classification parameters
+        group.add_argument("--num_classes", type=int, default=4, help='Number of output classes')
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+
+    def compute_loss(self, X_hat, Y):
+        return self.loss(X_hat, Y)
+
+    def training_step(self, train_batch, batch_idx):
+        V, F = train_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, _ = self(X_mesh)
+        loss = self.compute_loss(X_mesh, X_hat)
+        
+        self.log("train_loss", loss)        
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        V, F = val_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_mesh, X_hat)
+        
+        self.log("val_loss", loss, sync_dist=True)
+
+    def forward(self, X_mesh):        
+        z = self.encoder(X_mesh)
+        X_hat = self.fc(self.flatten(z))
+        return X_hat, z
