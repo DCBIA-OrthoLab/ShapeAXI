@@ -27,7 +27,10 @@ from pytorch3d.ops import (sample_points_from_meshes,
 from pytorch3d.loss import (
     chamfer_distance,
     point_mesh_edge_distance, 
-    point_mesh_face_distance
+    point_mesh_face_distance,
+    mesh_edge_loss, 
+    mesh_laplacian_smoothing, 
+    mesh_normal_consistency,
 )
 
 import json
@@ -37,6 +40,7 @@ from shapeaxi import utils
 from shapeaxi.saxi_layers import IcosahedronConv2d, TimeDistributed, SelfAttention, Residual, FeedForward, MHA, TimeDistributed, UnpoolMHA, SmoothAttention, SmoothMHA
 from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
 from shapeaxi.colors import bcolors
+from shapeaxi.saxi_losses import saxi_point_triangle_distance
 
 import lightning as L
 from lightning.pytorch.core import LightningModule
@@ -1920,7 +1924,7 @@ class SaxiRingMT(LightningModule):
         return (layer[:3] == 'Ico')
 
 class SaxiMHAEncoder(nn.Module):
-    def __init__(self, input_dim=3, embed_dim=128, num_heads=4, K=6, output_dim=256, sample_levels=[40962, 10242, 2562, 642, 162], hidden_dim=64, dropout=0.1, return_sorted=False):
+    def __init__(self, input_dim=3, embed_dim=128, num_heads=4, K=6, output_dim=256, sample_levels=[40962, 10242, 2562, 642, 162], hidden_dim=64, dropout=0.1, return_sorted=True):
         super(SaxiMHAEncoder, self).__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -1932,7 +1936,7 @@ class SaxiMHAEncoder(nn.Module):
 
         self.embedding = nn.Linear(input_dim, embed_dim)
 
-        for i, N in enumerate(sample_levels):
+        for i, sl in enumerate(sample_levels):
             mha = MHA(embed_dim, num_heads, dropout)
             mha_td = TimeDistributed(mha)
             setattr(self, f'mha_td{i}', mha_td)
@@ -1965,15 +1969,11 @@ class SaxiMHAEncoder(nn.Module):
         x = knn_gather(x, indices).squeeze(-2).contiguous()
 
         return x, indices
-    
-    def sample_points_from_meshes(self, x_mesh, Ns):
-        return sample_points_from_meshes(x_mesh, Ns)
         
-    def forward(self, x_mesh):
-
-        x_sampled = self.sample_points_from_meshes(x_mesh, self.sample_levels[0])
-
-        x = self.embedding(x_sampled)
+    def forward(self, x):
+        
+        x_sampled = x
+        x = self.embedding(x)
         
         for i, sl in enumerate(self.sample_levels):
             
@@ -1995,11 +1995,11 @@ class SaxiMHAEncoder(nn.Module):
     
 
 class SaxiMHADecoder(nn.Module):
-    def __init__(self, input_dim=256, L=4, embed_dim=128, output_dim=3, num_heads=4,  K=4, hidden_dim=64, dropout=0.1, return_sorted=True):
+    def __init__(self, input_dim=256, sample_levels=[162, 642, 2562, 10242, 40962], embed_dim=128, output_dim=3, num_heads=4,  K=4, hidden_dim=64, dropout=0.1, return_sorted=True):
         super(SaxiMHADecoder, self).__init__()
 
         self.input_dim = input_dim
-        self.L = L
+        self.sample_levels = sample_levels
         self.K = K
         self.embed_dim = embed_dim
         self.num_heads = num_heads        
@@ -2011,7 +2011,7 @@ class SaxiMHADecoder(nn.Module):
 
         self.unpool = UnpoolMHA()
 
-        for i in range(self.L):
+        for i, sl in enumerate(self.sample_levels):
             mha = MHA(embed_dim, num_heads, dropout)
             mha_td = TimeDistributed(mha)
             setattr(self, f'mha_td{i}', mha_td)
@@ -2048,7 +2048,7 @@ class SaxiMHADecoder(nn.Module):
         
         x = self.embedding(x)
 
-        for i in range(self.L):
+        for i, sl in enumerate(self.sample_levels):
 
             # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
             # dists = knn_points(x_sampled, x_sampled, K=6)
@@ -2059,6 +2059,7 @@ class SaxiMHADecoder(nn.Module):
             x = getattr(self, f'residual_ff{i}')(x)
             ## reduce x in the time dim
             x = self.unpool(x)
+            x = self.sample_points(x, sl)
             
         x = self.output(x)
         return x
@@ -2079,7 +2080,7 @@ class SaxiAE(LightningModule):
                                       K=self.hparams.K_encoder)
         
         self.decoder = SaxiMHADecoder(input_dim=self.hparams.output_dim, 
-                                      L=len(self.hparams.sample_levels), 
+                                      sample_levels=self.hparams.sample_levels.reverse(), 
                                       embed_dim=self.hparams.embed_dim, 
                                       output_dim=self.hparams.input_dim, 
                                       num_heads=self.hparams.num_heads, 
@@ -2096,20 +2097,24 @@ class SaxiAE(LightningModule):
         
         # Encoder parameters
         
-        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
-        group.add_argument("--embed_dim", type=int, default=128, help='Embedding dimension')
+        group.add_argument("--input_dim", type=int, default=6, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=256, help='Embedding dimension')
         group.add_argument("--num_heads", type=int, default=8, help='Number of attention heads')
-        group.add_argument("--output_dim", type=int, default=1024, help='Output dimension from the encoder')
+        group.add_argument("--output_dim", type=int, default=256, help='Output dimension from the encoder')
         group.add_argument("--sample_levels", type=int, default=[10242, 2562, 642], nargs="+", help='Number of sampling levels in the encoder')
-        group.add_argument("--hidden_dim", type=int, default=64, help='Hidden dimension size')
+        group.add_argument("--hidden_dim", type=int, default=128, help='Hidden dimension size')
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
         
         # Decoder parameters
         group.add_argument("--K_encoder", type=int, default=8, help='Top K nearest neighbors to consider in the encoder')
-        group.add_argument("--K_decoder", type=int, default=4, help='Top K nearest neighbors to consider in the decoder steps')
+        group.add_argument("--K_decoder", type=int, default=8, help='Top K nearest neighbors to consider in the decoder steps')
         group.add_argument("--loss_chamfer_weight", type=float, default=1.0, help='Loss weight for the chamfer distance')
+        # group.add_argument("--loss_point_triangle_weight", type=float, default=0.0, help='Loss weight for the point to nearest face plane distance')
         group.add_argument("--loss_mesh_face_weight", type=float, default=1.0, help='Loss weight for the mesh face distance')
-        group.add_argument("--loss_mesh_edge_weight", type=float, default=.001, help='Loss weight for the mesh edge distance')
+        group.add_argument("--loss_mesh_edge_weight", type=float, default=1.0, help='Loss weight for the mesh edge distance')
+        # group.add_argument("--loss_laplacian_weight", type=float, default=1.0, help='Loss weight for the laplacian smoothing')
+        # group.add_argument("--loss_edge_weight", type=float, default=10.0, help='Loss weight for the mesh edge distance')
+        # group.add_argument("--loss_normal_weight", type=float, default=0.01, help='Loss weight for the mesh normal distance')
 
         return parent_parser
     
@@ -2121,26 +2126,74 @@ class SaxiAE(LightningModule):
     
     def create_mesh(self, V, F):
         return Meshes(verts=V, faces=F)
+    
+    def create_mesh_from_points(self, X):
+        dists = knn_points(X, X, K=3)
+        F = dists.idx
+        return Meshes(verts=X, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        if return_normals:
+            x, x_N = sample_points_from_meshes(x_mesh, Ns, return_normals=True)
+            return x, x_N
+        return sample_points_from_meshes(x_mesh, Ns)
 
-    def compute_loss(self, X_mesh, X_hat):
+    def compute_loss(self, X_mesh, X, X_hat, step="train", sync_dist=False):
         # We compare the two sets of pointclouds by computing (a) the chamfer loss
-        X = sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X, X_N = X[..., :3], X[..., 3:]
+        X_hat, X_hat_N = X_hat[..., :3], X_hat[..., 3:]
+        X_hat_N = X_hat_N / torch.norm(X_hat_N, dim=-1, keepdim=True)
+        
+        loss_chamfer, loss_chamfer_N = chamfer_distance(X, X_hat, x_normals=X_N, y_normals=X_hat_N, batch_reduction="sum")
+        # loss_point_mesh_face = saxi_point_triangle_distance(X, X_hat) + saxi_point_triangle_distance(X_hat, X_hat, ignore_first=True, K_triangle=9, randomize=True)  
+        # loss_point_triangle = saxi_point_triangle_distance(X, X_hat)
+
+        # Generate pseudo faces for the input point cloud, i.e, for each point find the 3 closest neighbors
+        # dists = knn_points(X, X, K=3)
+        # X_F = dists.idx
+        
+        # Find the nearest neighbors in the predicted mesh
+        # dists = knn_points(X, X_hat, K=1)
+        # Sort the predicted points based on the indices of the nearest neighbors
+        # X_hat_sorted = knn_gather(X_hat, dists.idx).squeeze(-2).contiguous()
+
+        # X_hat_mesh = Meshes(verts=X_hat_sorted, faces=X_F)
+
+         # and (b) the edge length of the predicted mesh
+        # loss_edge = mesh_edge_loss(X_hat_mesh)
+    
+        # mesh laplacian smoothing
+        # loss_laplacian = mesh_laplacian_smoothing(X_hat_mesh, method="uniform")
+
         X_hat = Pointclouds(X_hat)
-        loss_chamfer, _ = chamfer_distance(X, X_hat)
         loss_point_mesh_face = point_mesh_face_distance(X_mesh, X_hat)
         loss_point_mesh_edge = point_mesh_edge_distance(X_mesh, X_hat)
 
-        return loss_chamfer*self.hparams.loss_chamfer_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight
+        # loss = (loss_chamfer + loss_chamfer_N)*self.hparams.loss_chamfer_weight + loss_point_triangle*self.hparams.loss_point_triangle_weight + loss_laplacian*self.hparams.loss_laplacian_weight + loss_edge*self.hparams.loss_edge_weight 
+
+        loss = (loss_chamfer + loss_chamfer_N)*self.hparams.loss_chamfer_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight
+
+        self.log(f"{step}_loss", loss, sync_dist=sync_dist)
+        # self.log(f"{step}_loss_point_triangle", loss_point_triangle, sync_dist=sync_dist)
+        self.log(f"{step}_loss_chamfer", loss_chamfer, sync_dist=sync_dist)
+        self.log(f"{step}_loss_chamfer_N", loss_chamfer_N, sync_dist=sync_dist)
+        # self.log(f"{step}_loss_laplacian", loss_laplacian, sync_dist=sync_dist)        
+        # self.log(f"{step}_loss_edge", loss_edge, sync_dist=sync_dist)
+        self.log(f"{step}_loss_point_mesh_face", loss_point_mesh_face, sync_dist=sync_dist)
+        self.log(f"{step}_loss_point_mesh_edge", loss_point_mesh_edge, sync_dist=sync_dist)
+
+        return loss
 
     def training_step(self, train_batch, batch_idx):
         V, F = train_batch
         
-        
         X_mesh = self.create_mesh(V, F)
-        X_hat, z = self(X_mesh)
-        loss = self.compute_loss(X_mesh, X_hat)
+        X, X_N = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0], return_normals=True)
         
-        self.log("train_loss", loss)        
+        X = torch.cat([X, X_N], dim=-1)
+        X_hat, z = self(X)
+
+        loss = self.compute_loss(X_mesh, X, X_hat)
 
         return loss
 
@@ -2149,14 +2202,16 @@ class SaxiAE(LightningModule):
         V, F = val_batch
         
         X_mesh = self.create_mesh(V, F)
-        X_hat, z = self(X_mesh)
 
-        loss = self.compute_loss(X_mesh, X_hat)
-        
-        self.log("val_loss", loss, sync_dist=True)
+        X, X_N = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0], return_normals=True)
+        X = torch.cat([X, X_N], dim=-1)
 
-    def forward(self, X_mesh):        
-        z = self.encoder(X_mesh)
+        X_hat, z = self(X)
+
+        self.compute_loss(X_mesh, X, X_hat, step="val", sync_dist=True)
+
+    def forward(self, X):        
+        z = self.encoder(X)
         X_hat = self.decoder(z)
         return X_hat, z
     

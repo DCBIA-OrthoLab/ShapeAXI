@@ -258,29 +258,34 @@ class SaxiAELoggerNeptune(Callback):
 
             with torch.no_grad():
                 V, F = batch
+
                 X_mesh = pl_module.create_mesh(V, F)
-                X_hat, z = pl_module(X_mesh)
+                X, X_N = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.sample_levels[0], return_normals=True)
+                X = torch.cat([X, X_N], dim=-1)
 
-                X_samples = pl_module.encoder.sample_points_from_meshes(X_mesh, self.num_samples)
+                X_hat, z = pl_module(X)
+
+                X_samples = pl_module.sample_points_from_meshes(X_mesh, self.num_samples)
                 X_samples_hat, _ = pl_module.encoder.sample_points(X_hat[0:1], self.num_samples)
-
-                fig = self.plot_pointclouds(X_samples[0].cpu().numpy(), X_samples_hat[0].detach().cpu().numpy())
+                X_samples_orig, _ = pl_module.encoder.sample_points(X_mesh.verts_list()[0].unsqueeze(0), self.num_samples)
+                
+                fig = self.plot_pointclouds(X_samples_orig[0].cpu().numpy(), X_samples[0].cpu().numpy(), X_samples_hat[0].detach().cpu().numpy())
                 trainer.logger.experiment["images/surf"].upload(fig)
 
     
-    def plot_pointclouds(self, X, X_hat):
+    def plot_pointclouds(self, X, X_samples, X_hat):
     
 
         fig = make_subplots(
-            rows=1, cols=2,
-            specs=[[{'type': 'scatter3d'}, {'type': 'scatter3d'}]]
+            rows=2, cols=2,
+            specs=[[{'type': 'scatter3d'}, {'type': 'scatter3d'}], [{'type': 'scatter3d'}, {}]]
         )
 
         # First scatter plot
         fig.add_trace(
-            go.Scatter3d(x=X[:,0], y=X[:,1], z=X[:,2], mode='markers', marker=dict(
+            go.Scatter3d(x=X_samples[:,0], y=X_samples[:,1], z=X_samples[:,2], mode='markers', marker=dict(
                 size=2,
-                color=X[:,2],                # set color to an array/list of desired values
+                color=X_samples[:,2],                # set color to an array/list of desired values
                 colorscale='Viridis',   # choose a colorscale
                 opacity=0.8
             )),
@@ -298,7 +303,18 @@ class SaxiAELoggerNeptune(Callback):
             row=1, col=2
         )
 
+        # Second scatter plot
+        fig.add_trace(
+            go.Scatter3d(x=X[:,0], y=X[:,1], z=X[:,2], mode='markers', marker=dict(
+                size=2,
+                color=X[:,2],                # set color to an array/list of desired values
+                colorscale='Viridis',   # choose a colorscale
+                opacity=0.8
+            )),
+            row=2, col=1
+        )
+
         # Update the layout if necessary
-        fig.update_layout(height=600, width=1200, title_text="Side-by-Side 3D Scatter Plots")
+        fig.update_layout(height=900, width=1200, title_text="Side-by-Side 3D Scatter Plots")
 
         return fig
