@@ -2059,7 +2059,7 @@ class SaxiMHADecoder(nn.Module):
             x = getattr(self, f'residual_ff{i}')(x)
             ## reduce x in the time dim
             x = self.unpool(x)
-            x = self.sample_points(x, sl)
+            x, _ = self.sample_points(x, sl)
             
         x = self.output(x)
         return x
