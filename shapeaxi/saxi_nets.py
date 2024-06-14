@@ -2080,7 +2080,7 @@ class SaxiAE(LightningModule):
                                       K=self.hparams.K_encoder)
         
         self.decoder = SaxiMHADecoder(input_dim=self.hparams.output_dim, 
-                                      sample_levels=self.hparams.sample_levels.reverse(), 
+                                      sample_levels=self.hparams.sample_levels[::-1], 
                                       embed_dim=self.hparams.embed_dim, 
                                       output_dim=self.hparams.input_dim, 
                                       num_heads=self.hparams.num_heads, 
