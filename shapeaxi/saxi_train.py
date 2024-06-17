@@ -20,7 +20,6 @@ torch.set_float32_matmul_precision('high')
 from shapeaxi.saxi_dataset import SaxiDataModule, SaxiIcoDataModule, SaxiFreesurferDataModule, SaxiFreesurferMPDataModule
 from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 from shapeaxi import saxi_nets
-from shapeaxi.saxi_nets import MonaiUNet, SaxiIcoClassification
 from shapeaxi.saxi_logger import SaxiImageLoggerTensorboard, SaxiImageLoggerTensorboardSegmentation, SaxiImageLoggerTensorboardIco, SaxiImageLoggerTensorboardIco_fs, SaxiImageLoggerNeptune, SaxiImageLoggerNeptune_Ico_fs
 
 

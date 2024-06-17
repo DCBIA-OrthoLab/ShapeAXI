@@ -286,25 +286,26 @@ class IcosahedronLinear(nn.Module):
         output = output.contiguous().view(size_initial)
 
         return output
-
+    
 class TimeDistributed(nn.Module):
-    # Wrapper to apply a module to each time step of a sequence
-    def __init__(self, module):
+    def __init__(self, module, time_dim=1):
         super(TimeDistributed, self).__init__()
         self.module = module
- 
-    def forward(self, input_seq):
+        self.time_dim = time_dim
+
+    def forward(self, input_seq, *args, **kwargs):
         assert len(input_seq.size()) > 2
- 
+
         # reshape input data --> (samples * timesteps, input_size)
         # squash timesteps
-
-        size = input_seq.size()
+        size = list(input_seq.size())
         batch_size = size[0]
-        time_steps = size[1]
-        size_reshape = [batch_size*time_steps] + list(size[2:])
+        time_steps = size.pop(self.time_dim)
+        size_reshape = [batch_size * time_steps] + list(size[1:])
         reshaped_input = input_seq.contiguous().view(size_reshape)
-        output = self.module(reshaped_input)
+
+        # Pass the additional arguments to the module
+        output = self.module(reshaped_input, *args, **kwargs)
 
         if isinstance(output, tuple):
             output = list(output)
@@ -326,7 +327,12 @@ class Identity(nn.Module):
 
     def forward(self, x):
         return x
-    
+
+
+class Norm(nn.Module):
+    def __call__(self, x):
+        return torch.nn.functional.normalize(x, p=2, dim=-1)
+
 class ProjectionHead(nn.Module):
     # Projection MLP
     def __init__(self, input_dim=1280, hidden_dim=1280, output_dim=128):
@@ -336,15 +342,15 @@ class ProjectionHead(nn.Module):
         self.hidden_dim = hidden_dim
 
         self.model = nn.Sequential(
-            nn.Linear(self.input_dim, self.hidden_dim),
-            nn.BatchNorm1d(self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.output_dim, bias=False)
+            nn.Linear(self.input_dim, self.hidden_dim, bias=False),
+            nn.Tanh(),
+            nn.Linear(self.hidden_dim, self.output_dim, bias=False),
+            Norm()
         )
 
     def forward(self, x):
-        x_v = self.model(x)
-        return x, x_v
+        x = self.model(x)
+        return x
 
 class SelfAttention(nn.Module):
     def __init__(self, input_dim, hidden_dim, dim=1):
@@ -385,19 +391,79 @@ class MHA(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.return_weights = return_weights
-        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
     
     def forward(self, x):
         attn_output, attn_output_weights = self.attention(x, x, x)
         if self.return_weights:
             return attn_output, attn_output_weights
         return attn_output
+    
+class MHA_KNN(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, return_weights=False, K=6, return_sorted=True, random=False, return_v=False):
+        super(MHA_KNN, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.return_weights = return_weights
+        self.K = K
+        self.return_sorted = return_sorted
+        self.random = random
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
+        self.return_v = return_v
+    
+    def forward(self, x):
+
+        batch_size, V_n, Embed_dim = x.shape
+
+        # the query is the input point itself, the shape of q is [BS, V_n, 1, Embed_dim]
+        q = x.unsqueeze(-2)
+
+        if self.random:
+
+            # randomly select K points to the query            
+            idx = torch.randint(0, V_n, (batch_size, V_n, self.K), device=x.device)
+
+            q = x.unsqueeze(-2)
+            k = knn_gather(x, idx)
+
+            # compute the distances between the query and the randomly selected points
+            distances = torch.linalg.norm(k - q, dim=3)
+            # sort and gather the closest K points to the query
+            k = knn_gather(x, distances.argsort())
+
+        else:
+            #input shape of x is [BS, V_n, Embed_dim]
+            dists = knn_points(x, x, K=self.K, return_sorted=self.return_sorted)            
+            # compute the key, the input shape is [BS, V_n, K, Embed_dim], it has the closest K points to the query
+            k = knn_gather(x, dists.idx)
+        #the value tensor contains the directions towards the closest points. 
+        # the intuition here is that based on the query and key embeddings, the model will learn to predict
+        # the best direction to move the new embedding, i.e., create a new point in the point cloud
+        # the shape of v is [BS, V_n, K, Embed_dim]
+        v = k - q
+
+        q = q.contiguous().view(batch_size * V_n, 1, Embed_dim)
+        k = k.contiguous().view(batch_size * V_n, self.K, Embed_dim)
+        v = v.contiguous().view(batch_size * V_n, self.K, Embed_dim)        
+
+        v, x_w = self.attention(q, k, v)
+
+        v = v.contiguous().view(batch_size, V_n, Embed_dim)
+        x_w = x_w.contiguous().view(batch_size, V_n, self.K)
+        
+        # The new predicted point is the sum of the input point and the weighted sum of the directions
+        x = x + v
+
+        if self.return_v:
+            return x, v
+        return x
 
 class Residual(nn.Module):
     def __init__(self, module: nn.Module, dimension: int):
         super().__init__()
         self.module = module
-        self.norm = nn.LayerNorm(dimension)
+        # self.norm = nn.LayerNorm(dimension)
+        self.norm = Norm()
 
     def forward(self, x):
         # Assume that the "query" tensor is given first, so we can compute the
@@ -408,10 +474,10 @@ class FeedForward(nn.Module):
     def __init__(self, dimension: int, hidden_dimension: int, dropout: float = 0.1):
         super(FeedForward, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(dimension, hidden_dimension),
-            nn.GELU(),
+            nn.Linear(dimension, hidden_dimension, bias=False),
+            nn.Tanh(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dimension, dimension),
+            nn.Linear(hidden_dimension, dimension, bias=False),
         )
 
     def forward(self, x):
@@ -450,6 +516,33 @@ class UnpoolMHA(nn.Module):
     def __call__(self, x):                
         x = x.view(x.shape[0], -1, x.shape[-1])
         return x
+    
+class SmoothAttention(nn.Module):
+    def __init__(self, embed_dim=128, hidden_dim=64, K=4):
+        super(SmoothAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.attn = SelfAttention(embed_dim, hidden_dim, dim=2)
+        self.K = K
+    
+    def forward(self, x):
+
+        # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
+        dists = knn_points(x, x, K=self.K)
+        # gather the K closest points
+        x = knn_gather(x, dists.idx)
+
+        # apply self attention, i.e., weighted average of the K closest points
+        x, x_s = self.attn(x, x)
+
+        return x
+    
+class UnpoolMHA_KNN(nn.Module):
+    def __init__(self, module: nn.Module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, x):
+        return torch.cat([x, self.module(x)], dim=1)
     
 class SmoothAttention(nn.Module):
     def __init__(self, embed_dim=128, hidden_dim=64, K=4):

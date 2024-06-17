@@ -51,8 +51,7 @@ def main(args):
         dirpath=args.out,
         filename='{epoch}-{val_loss:.2f}',
         save_top_k=2,
-        monitor='val_loss',
-        save_last=True
+        monitor='val_loss'
         
     )
 
@@ -69,7 +68,8 @@ def main(args):
         logger_neptune = NeptuneLogger(
             project='ImageMindAnalytics/saxi',
             tags=args.neptune_tags,
-            api_key=os.environ['NEPTUNE_API_TOKEN']
+            api_key=os.environ['NEPTUNE_API_TOKEN'],
+            log_model_checkpoints=False
         )
         LOGGER = getattr(saxi_logger, args.logger)    
         image_logger = LOGGER(log_steps=args.log_steps)
@@ -84,7 +84,8 @@ def main(args):
         callbacks=callbacks,
         accelerator='gpu', 
         devices=torch.cuda.device_count(),
-        strategy=DDPStrategy(),
+        # strategy=DDPStrategy(),
+        strategy='ddp'
     )
     
     trainer.fit(model, datamodule=lotus_data, ckpt_path=args.model)
