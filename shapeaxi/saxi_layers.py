@@ -442,7 +442,7 @@ class MHA_KNN(nn.Module):
         # the shape of v is [BS, V_n, K, Embed_dim]
         v = k - q
 
-        q = q.contiguous().view(batch_size * V_n, 1, Embed_dim)
+        q = q.contiguous().view(batch_size * V_n, 1, Embed_dim) # Original point with dimension 1 added
         k = k.contiguous().view(batch_size * V_n, self.K, Embed_dim)
         v = v.contiguous().view(batch_size * V_n, self.K, Embed_dim)        
 
@@ -450,34 +450,39 @@ class MHA_KNN(nn.Module):
 
         v = v.contiguous().view(batch_size, V_n, Embed_dim)
         x_w = x_w.contiguous().view(batch_size, V_n, self.K)
+
+        x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_add_(1, dists.idx.view(batch_size, -1), x_w.view(batch_size, -1))
         
         # The new predicted point is the sum of the input point and the weighted sum of the directions
         x = x + v
 
         if self.return_v:
+            if self.return_weights:
+                return x, x_w, v
             return x, v
+        
+        if self.return_weights:
+            return x, x_w
         return x
 
 class Residual(nn.Module):
-    def __init__(self, module: nn.Module, dimension: int):
+    def __init__(self, module: nn.Module):
         super().__init__()
         self.module = module
-        # self.norm = nn.LayerNorm(dimension)
-        self.norm = Norm()
 
     def forward(self, x):
         # Assume that the "query" tensor is given first, so we can compute the
-        # residual.  This matches the signature of 'MultiHeadAttention'.
-        return self.norm(x + self.module(x))
+        # residual.
+        return x + self.module(x)
 
 class FeedForward(nn.Module):
-    def __init__(self, dimension: int, hidden_dimension: int, dropout: float = 0.1):
+    def __init__(self, input_dim: int, hidden_dim: int, dropout: float = 0.1):
         super(FeedForward, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(dimension, hidden_dimension, bias=False),
-            nn.Tanh(),
+            nn.Linear(input_dim, hidden_dim, bias=False),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dimension, dimension, bias=False),
+            nn.Linear(hidden_dim, input_dim, bias=False),
         )
 
     def forward(self, x):
