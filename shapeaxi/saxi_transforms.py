@@ -15,7 +15,7 @@ else:
 sys.path.append(code_path)
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
-
+import vtk
 from shapeaxi import utils
 
 # File which is a composition of transformations to be applied during training
@@ -99,6 +99,7 @@ class TrainTransform:
         self.train_transform = transforms.Compose(
             [
                 UnitSurfTransform(scale_factor=scale_factor),
+                TriangleFilter(),
                 RandomRotation()
             ]
         )
@@ -112,13 +113,23 @@ class EvalTransform:
     def __init__(self, scale_factor=None):
         self.eval_transform = transforms.Compose(
             [
-                UnitSurfTransform(scale_factor=scale_factor)
+                UnitSurfTransform(scale_factor=scale_factor),
+                TriangleFilter()
             ]
         )
 
     def __call__(self, surf):
         return self.eval_transform(surf)
 
+
+class TriangleFilter:
+    def __call__(self, surf):
+        triangleFilter = vtk.vtkTriangleFilter()
+        triangleFilter.SetInputData(surf)
+
+        triangleFilter.Update()
+
+        return triangleFilter.GetOutput()
 
 class RandomRemoveTeethTransform:
     # This transform is used to remove teeth from the surface (used for the SaxiSegmentation model)
