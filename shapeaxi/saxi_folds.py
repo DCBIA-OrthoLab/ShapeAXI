@@ -251,6 +251,10 @@ def main(args, arg_groups):
         for k in arg_groups['Train']:
             if k in saxi_train_args:        
                 saxi_train_args[k] = arg_groups['Train'][k]
+        
+        for k in arg_groups['Logger']:
+            if k in saxi_train_args:        
+                saxi_train_args[k] = arg_groups['Logger'][k]
 
         saxi_train_args['csv_train'] = csv_train
         saxi_train_args['csv_test'] = csv_test
@@ -266,10 +270,7 @@ def main(args, arg_groups):
                 if saxi_train_args[k]:
                     command.append('--' + str(k))
                     command.append(str(saxi_train_args[k]))
-            
-            env = os.environ.copy()
-            env['NEPTUNE_API_TOKEN'] = os.environ['NEPTUNE_API_TOKEN']
-            subprocess.run(command, env=env)
+            subprocess.run(command)
 
         print(bcolors.SUCCESS, "End training for fold {f}".format(f=f), bcolors.ENDC)
 
@@ -311,9 +312,9 @@ def main(args, arg_groups):
 
         saxi_predict_args = Namespace(**saxi_predict_args)
         fname = os.path.basename(csv_test)
-        out_prediction = os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
-        if not os.path.exists(out_prediction):
+        if not os.path.exists(os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))):
+            out_prediction = os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
             saxi_predict.main(saxi_predict_args)
 
         print(bcolors.SUCCESS, "End test for fold {f}".format(f=f), bcolors.ENDC)
@@ -346,209 +347,207 @@ def main(args, arg_groups):
         print(bcolors.SUCCESS, "End evaluation for fold {f}".format(f=f), bcolors.ENDC)
 
 
-#####################################################################################################################################################################################
-#                                                                                                                                                                                   #
-#                                                                                   Aggregate                                                                                       #
-#                                                                                                                                                                                   #
-#####################################################################################################################################################################################
+# #####################################################################################################################################################################################
+# #                                                                                                                                                                                   #
+# #                                                                                   Aggregate                                                                                       #
+# #                                                                                                                                                                                   #
+# #####################################################################################################################################################################################
 
 
-    if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
+#     if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
 
-        print(bcolors.INFO, "Start aggregate for all folds".format(f=f), bcolors.ENDC)
+#         print(bcolors.INFO, "Start aggregate for all folds".format(f=f), bcolors.ENDC)
 
-        # Create a single dataframe and prob array
-        out_prediction_agg = []
+#         # Create a single dataframe and prob array
+#         out_prediction_agg = []
 
-        if args.nn == "SaxiClassification":
-            # Create a single dataframe and prob array
-            out_prediction_probs_agg = []
+#         if args.nn == "SaxiClassification":
+#             # Create a single dataframe and prob array
+#             out_prediction_probs_agg = []
 
-            for f in range(0, args.folds):
+#             for f in range(0, args.folds):
                 
-                out_prediction_fn = aggregate(ext, args, f, out_prediction_agg)
-                out_prediction_agg.append(pd.read_csv(out_prediction_fn))
+#                 out_prediction_fn = aggregate(ext, args, f, out_prediction_agg)
+#                 out_prediction_agg.append(pd.read_csv(out_prediction_fn))
 
-                probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
-                out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
+#                 probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
+#                 out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
                 
-            # Concatenate all datragrames and probs
-            out_prediction_agg = pd.concat(out_prediction_agg)
-            if args.csv is not None:
-                fname = os.path.basename(args.csv.replace('.csv', '_train.csv'))
-            else:
-                fname = os.path.basename(args.csv_train)
-            out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
-            out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
+#             # Concatenate all datragrames and probs
+#             out_prediction_agg = pd.concat(out_prediction_agg)
+#             if args.csv is not None:
+#                 fname = os.path.basename(args.csv.replace('.csv', '_train.csv'))
+#             else:
+#                 fname = os.path.basename(args.csv_train)
+#             out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
+#             out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
 
-            out_prediction_probs_agg = np.concatenate(out_prediction_probs_agg)
-            out_prediction_probs_agg_fn = out_prediction_agg_fn.replace("_prediction.csv", "_probs.pickle")
-            pickle.dump(out_prediction_probs_agg, open(out_prediction_probs_agg_fn, 'wb'))
+#             out_prediction_probs_agg = np.concatenate(out_prediction_probs_agg)
+#             out_prediction_probs_agg_fn = out_prediction_agg_fn.replace("_prediction.csv", "_probs.pickle")
+#             pickle.dump(out_prediction_probs_agg, open(out_prediction_probs_agg_fn, 'wb'))
 
-        elif args.nn == "SaxiRegression":
+#         elif args.nn == "SaxiRegression":
             
-            for f in range(0, args.folds):
+#             for f in range(0, args.folds):
 
-                out_prediction_fn = aggregate(ext, args, f, out_prediction_agg)
-                out_prediction_agg.append(pd.read_csv(out_prediction_fn))
+#                 out_prediction_fn = aggregate(ext, args, f, out_prediction_agg)
+#                 out_prediction_agg.append(pd.read_csv(out_prediction_fn))
             
-            # Concatenate all datragrames and probs
-            out_prediction_agg = pd.concat(out_prediction_agg)
-            out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
-            out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
+#             # Concatenate all datragrames and probs
+#             out_prediction_agg = pd.concat(out_prediction_agg)
+#             out_prediction_agg_fn = os.path.join(args.out, 'test', fname.replace(ext, "_aggregate_prediction" + ext))
+#             out_prediction_agg.to_csv(out_prediction_agg_fn, index=False)
         
         
-        #Run the evaluation for the aggregate
-        saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
-        saxi_eval_args['csv'] = out_prediction_agg_fn
-        saxi_eval_args['csv_true_column'] = args.class_column
-        saxi_eval_args['nn'] = args.nn
-        saxi_eval_args['eval_metric'] = args.eval_metric
-        saxi_eval_args['mount_point'] = args.mount_point
-        saxi_eval_args = Namespace(**saxi_eval_args)    
-        saxi_eval.main(saxi_eval_args)
+#         #Run the evaluation for the aggregate
+#         saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
+#         saxi_eval_args['csv'] = out_prediction_agg_fn
+#         saxi_eval_args['csv_true_column'] = args.class_column
+#         saxi_eval_args['nn'] = args.nn
+#         saxi_eval_args['eval_metric'] = args.eval_metric
+#         saxi_eval_args['mount_point'] = args.mount_point
+#         saxi_eval_args = Namespace(**saxi_eval_args)    
+#         saxi_eval.main(saxi_eval_args)
 
-        print(bcolors.SUCCESS, "END aggregate prediction for ALL folds", bcolors.ENDC)
-
-
-#####################################################################################################################################################################################
-#                                                                                                                                                                                   #
-#                                                                                Explainability                                                                                     #
-#                                                                                                                                                                                   #
-#####################################################################################################################################################################################
+#         print(bcolors.SUCCESS, "END aggregate prediction for ALL folds", bcolors.ENDC)
 
 
-    for f in range(0, args.folds):
-        print(bcolors.INFO, "Start explainability for fold {f}".format(f=f), bcolors.ENDC)
-        if args.csv is not None:
-            csv_test = args.csv.replace(ext, '_train_fold{f}_test.csv').format(f=f)
-        else:
-            csv_test = args.csv_train.replace(ext, '_fold{f}_test.csv').format(f=f)
-        fname = os.path.basename(csv_test)
-        path_to_csv_test = os.path.join(args.mount_point, csv_test)
-        df_test = pd.read_csv(path_to_csv_test)
-        saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))    
-        best_model_path = get_best_checkpoint(saxi_train_args_out)
-        saxi_predict_args_out = os.path.join(args.out, 'test', 'fold{f}'.format(f=f))
-        out_prediction = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+# #####################################################################################################################################################################################
+# #                                                                                                                                                                                   #
+# #                                                                                Explainability                                                                                     #
+# #                                                                                                                                                                                   #
+# #####################################################################################################################################################################################
 
-        if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
-            saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
-            saxi_gradcam_args['nn'] = args.nn
-            saxi_gradcam_args['csv_test'] = out_prediction
-            saxi_gradcam_args['surf_column'] = args.surf_column
-            saxi_gradcam_args['class_column'] = args.class_column
-            saxi_gradcam_args['num_workers'] = args.num_workers
-            saxi_gradcam_args['model'] = best_model_path
-            saxi_gradcam_args['target_layer'] = args.target_layer
-            saxi_gradcam_args['mount_point'] = args.mount_point
-            saxi_gradcam_args['fps'] = args.fps
-            saxi_gradcam_args['device'] = 'cuda:0'
 
-            if args.nn == "SaxiClassification":
-                for target_class in df_test[args.class_column].unique():
-                    saxi_gradcam_args['target_class'] = target_class
+#     for f in range(0, args.folds):
+#         print(bcolors.INFO, "Start explainability for fold {f}".format(f=f), bcolors.ENDC)
+#         if args.csv is not None:
+#             csv_test = args.csv.replace(ext, '_train_fold{f}_test.csv').format(f=f)
+#         else:
+#             csv_test = args.csv_train.replace(ext, '_fold{f}_test.csv').format(f=f)
+#         fname = os.path.basename(csv_test)
+#         path_to_csv_test = os.path.join(args.mount_point, csv_test)
+#         df_test = pd.read_csv(path_to_csv_test)
+#         saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=f))    
+#         best_model_path = get_best_checkpoint(saxi_train_args_out)
+#         saxi_predict_args_out = os.path.join(args.out, 'test', 'fold{f}'.format(f=f))
+#         out_prediction = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
-            else:
-                saxi_gradcam_args['target_class'] = None
+#         if args.nn == "SaxiClassification" or args.nn == "SaxiRegression" or args.nn == "SaxiRingClassification":
+#             saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
+#             saxi_gradcam_args['nn'] = args.nn
+#             saxi_gradcam_args['csv_test'] = out_prediction
+#             saxi_gradcam_args['surf_column'] = args.surf_column
+#             saxi_gradcam_args['class_column'] = args.class_column
+#             saxi_gradcam_args['num_workers'] = args.num_workers
+#             saxi_gradcam_args['model'] = best_model_path
+#             saxi_gradcam_args['target_layer'] = args.target_layer
+#             saxi_gradcam_args['mount_point'] = args.mount_point
+#             saxi_gradcam_args['fps'] = args.fps
+#             saxi_gradcam_args['device'] = 'cuda:0'
+
+#             if args.nn == "SaxiClassification":
+#                 for target_class in df_test[args.class_column].unique():
+#                     saxi_gradcam_args['target_class'] = target_class
+
+#             else:
+#                 saxi_gradcam_args['target_class'] = None
             
-            saxi_gradcam_args = Namespace(**saxi_gradcam_args)
-            saxi_gradcam.main(saxi_gradcam_args)
+#             saxi_gradcam_args = Namespace(**saxi_gradcam_args)
+#             saxi_gradcam.main(saxi_gradcam_args)
 
 
-        elif args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs":
+#         elif args.nn == "SaxiRing":
             
-            if args.csv is not None:
-                csv_train = args.csv.replace(ext, '_train_fold{f}_train_train.csv').format(f=f)
-                csv_valid = args.csv.replace(ext, '_train_fold{f}_train_test.csv').format(f=f)
-            else:
-                csv_train = args.csv_train.replace(ext, '_fold{f}_train_train.csv').format(f=f)
-                csv_valid = args.csv_train.replace(ext, '_fold{f}_train_test.csv').format(f=f)
+#             if args.csv is not None:
+#                 csv_train = args.csv.replace(ext, '_train_fold{f}_train_train.csv').format(f=f)
+#                 csv_valid = args.csv.replace(ext, '_train_fold{f}_train_test.csv').format(f=f)
+#             else:
+#                 csv_train = args.csv_train.replace(ext, '_fold{f}_train_train.csv').format(f=f)
+#                 csv_valid = args.csv_train.replace(ext, '_fold{f}_train_test.csv').format(f=f)
 
-            saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
-            saxi_gradcam_args['nn'] = args.nn
-            saxi_gradcam_args['csv_test'] = out_prediction
-            saxi_gradcam_args['csv_train'] = csv_train
-            saxi_gradcam_args['csv_valid'] = csv_valid
-            saxi_gradcam_args['surf_column'] = args.surf_column
-            saxi_gradcam_args['class_column'] = args.class_column
-            saxi_gradcam_args['num_workers'] = args.num_workers
-            saxi_gradcam_args['model'] = best_model_path
-            saxi_gradcam_args['target_layer'] = args.target_layer
-            saxi_gradcam_args['mount_point'] = args.mount_point
-            saxi_gradcam_args['fps'] = args.fps
-            saxi_gradcam_args['path_ico_right'] = args.path_ico_right
-            saxi_gradcam_args['path_ico_left'] = args.path_ico_left
-            saxi_gradcam_args['target_class'] = 1
-            saxi_gradcam_args['device'] = 'cuda:0'
-            saxi_gradcam_args['fs_path'] = args.fs_path
-            saxi_gradcam_args['out'] = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path))
-            saxi_gradcam_args = Namespace(**saxi_gradcam_args)
-            saxi_gradcam.main(saxi_gradcam_args)
+#             saxi_gradcam_args = get_argparse_dict(saxi_gradcam.get_argparse())
+#             saxi_gradcam_args['nn'] = args.nn
+#             saxi_gradcam_args['csv_test'] = out_prediction
+#             saxi_gradcam_args['surf_column'] = args.surf_column
+#             saxi_gradcam_args['class_column'] = args.class_column
+#             saxi_gradcam_args['num_workers'] = args.num_workers
+#             saxi_gradcam_args['model'] = best_model_path
+#             saxi_gradcam_args['target_layer'] = args.target_layer
+#             saxi_gradcam_args['mount_point'] = args.mount_point
+#             saxi_gradcam_args['fps'] = args.fps
+#             saxi_gradcam_args['path_ico_right'] = args.path_ico_right
+#             saxi_gradcam_args['path_ico_left'] = args.path_ico_left
+#             saxi_gradcam_args['target_class'] = 1.0
+#             saxi_gradcam_args['device'] = 'cuda:0'
+#             saxi_gradcam_args['fs_path'] = args.fs_path
+#             saxi_gradcam_args['out'] = os.path.join(saxi_predict_args_out, os.path.basename(best_model_path))
+#             saxi_gradcam_args = Namespace(**saxi_gradcam_args)
+#             saxi_gradcam.main(saxi_gradcam_args)
 
     
-        print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
+#         print(bcolors.SUCCESS, "End explainability for fold {f}".format(f=f), bcolors.ENDC)
 
 
-#####################################################################################################################################################################################
-#                                                                                                                                                                                   #
-#                                                                      Test and Evaluation of the Best Model                                                                        #
-#                                                                                                                                                                                   #
-#####################################################################################################################################################################################
+# #####################################################################################################################################################################################
+# #                                                                                                                                                                                   #
+# #                                                                      Test and Evaluation of the Best Model                                                                        #
+# #                                                                                                                                                                                   #
+# #####################################################################################################################################################################################
 
 
-    # Print the best model and its weighted F1 score
-    print(bcolors.PROC,"Best model fold :", best_model_fold,bcolors.ENDC)
-    print(bcolors.PROC,f"Best Weighted {args.eval_metric} score:", best_eval_metric, bcolors.ENDC)
+#     # Print the best model and its weighted F1 score
+#     print(bcolors.PROC,"Best model fold :", best_model_fold,bcolors.ENDC)
+#     print(bcolors.PROC,f"Best Weighted {args.eval_metric} score:", best_eval_metric, bcolors.ENDC)
 
-    if args.csv is not None:
-        csv_test = args.csv.replace(ext, '_test.csv')
-    else:
-        csv_test = args.csv_test
-    saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=best_model_fold))
+#     if args.csv is not None:
+#         csv_test = args.csv.replace(ext, '_test.csv')
+#     else:
+#         csv_test = args.csv_test
+#     saxi_train_args_out = os.path.join(args.out, 'train', 'fold{f}'.format(f=best_model_fold))
 
-    print(bcolors.INFO, f"Start testing of the best model (fold {best_model_fold})", bcolors.ENDC)
-    best_model_path = get_best_checkpoint(saxi_train_args_out)
-    saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
+#     print(bcolors.INFO, f"Start testing of the best model (fold {best_model_fold})", bcolors.ENDC)
+#     best_model_path = get_best_checkpoint(saxi_train_args_out)
+#     saxi_predict_args = get_argparse_dict(saxi_predict.get_argparse())
 
-    saxi_predict_args['csv'] = csv_test
-    saxi_predict_args['model'] = best_model_path
-    saxi_predict_args['surf_column'] = args.surf_column
-    saxi_predict_args['class_column'] = args.class_column
-    saxi_predict_args['mount_point'] = args.mount_point
-    saxi_predict_args['nn'] = args.nn
-    saxi_predict_args['crown_segmentation'] = args.crown_segmentation
-    saxi_predict_args['path_ico_right'] = args.path_ico_right
-    saxi_predict_args['path_ico_left'] = args.path_ico_left
-    saxi_predict_args['fdi'] = args.fdi
-    saxi_predict_args['fs_path'] = args.fs_path
-    saxi_predict_args['device'] = 'cuda:0'
-    saxi_predict_args['out'] = os.path.join(args.out, f'best_test_fold{best_model_fold}')
+#     saxi_predict_args['csv'] = csv_test
+#     saxi_predict_args['model'] = best_model_path
+#     saxi_predict_args['surf_column'] = args.surf_column
+#     saxi_predict_args['class_column'] = args.class_column
+#     saxi_predict_args['mount_point'] = args.mount_point
+#     saxi_predict_args['nn'] = args.nn
+#     saxi_predict_args['crown_segmentation'] = args.crown_segmentation
+#     saxi_predict_args['path_ico_right'] = args.path_ico_right
+#     saxi_predict_args['path_ico_left'] = args.path_ico_left
+#     saxi_predict_args['fdi'] = args.fdi
+#     saxi_predict_args['fs_path'] = args.fs_path
+#     saxi_predict_args['device'] = 'cuda:0'
+#     saxi_predict_args['out'] = os.path.join(args.out, f'best_test_fold{best_model_fold}')
 
-    saxi_predict_args = Namespace(**saxi_predict_args)
-    fname = os.path.basename(csv_test)
-    out_prediction = os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
+#     saxi_predict_args = Namespace(**saxi_predict_args)
+#     fname = os.path.basename(csv_test)
+#     out_prediction = os.path.join(saxi_predict_args.out, os.path.basename(best_model_path), fname.replace(ext, "_prediction" + ext))
 
-    if not os.path.exists(out_prediction):
-        saxi_predict.main(saxi_predict_args)
+#     if not os.path.exists(out_prediction):
+#         saxi_predict.main(saxi_predict_args)
 
-    print(bcolors.SUCCESS, "End testing of the best model", bcolors.ENDC)
+#     print(bcolors.SUCCESS, "End testing of the best model", bcolors.ENDC)
 
-    ############# Run the evaluation for the prediction #########################
+#     ############# Run the evaluation for the prediction #########################
 
-    print(bcolors.INFO, "Start evaluation of the best model", bcolors.ENDC)
-    saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
+#     print(bcolors.INFO, "Start evaluation of the best model", bcolors.ENDC)
+#     saxi_eval_args = get_argparse_dict(saxi_eval.get_argparse())
 
-    saxi_eval_args['csv'] = out_prediction
-    saxi_eval_args['class_column'] = args.class_column
-    saxi_eval_args['nn'] = args.nn
-    saxi_eval_args['eval_metric'] = args.eval_metric
-    saxi_eval_args['mount_point'] = args.mount_point
-    saxi_eval_args = Namespace(**saxi_eval_args)
+#     saxi_eval_args['csv'] = out_prediction
+#     saxi_eval_args['class_column'] = args.class_column
+#     saxi_eval_args['nn'] = args.nn
+#     saxi_eval_args['eval_metric'] = args.eval_metric
+#     saxi_eval_args['mount_point'] = args.mount_point
+#     saxi_eval_args = Namespace(**saxi_eval_args)
 
-    saxi_eval.main(saxi_eval_args)
+#     saxi_eval.main(saxi_eval_args)
 
-    print(bcolors.SUCCESS, "End evaluation of the best model".format(f=f), bcolors.ENDC)
+#     print(bcolors.SUCCESS, "End evaluation of the best model".format(f=f), bcolors.ENDC)
 
 
 #####################################################################################################################################################################################
@@ -559,6 +558,12 @@ def main(args, arg_groups):
 
 
 def cml():
+    '''
+    Command line interface for the saxi_folds.py script
+
+    Args : 
+        None
+    '''
     # Command line interface
     parser = argparse.ArgumentParser(description='Automatically train and evaluate a N fold cross-validation model for Shape Analysis Explainability and Interpretability')
     # Arguments used for split the data into the different folds
@@ -572,7 +577,7 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA'])
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--train_sphere_samples', type=int, help='Number of samples for the training sphere', default=10000)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
@@ -593,16 +598,10 @@ def cml():
     train_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
     train_group.add_argument('--batch_size', type=int, help='Batch size', default=3)    
     train_group.add_argument('--patience', type=int, help='Patience for early stopping', default=30)
-    train_group.add_argument('--log_every_n_steps', type=int, help='Log every n steps', default=10)    
-    train_group.add_argument('--tb_dir', type=str, help='Tensorboard output dir', default=None)
-    train_group.add_argument('--tb_name', type=str, help='Tensorboard experiment name', default="tensorboard")
-    train_group.add_argument('--neptune_project', type=str, help='Neptune project', default=None)
-    train_group.add_argument('--neptune_tags', type=str, help='Neptune tags', default=None)
     train_group.add_argument('--path_ico_right', type=str, help='Path to ico right (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk')
     train_group.add_argument('--path_ico_left', type=str, help='Path to ico left (default: ../3DObject/sphere_f327680_v163842.vtk)', default='./3DObject/sphere_f327680_v163842.vtk',)
     train_group.add_argument('--layer', type=str, help="Layer, choose between 'Att','IcoConv2D','IcoConv1D','IcoLinear' (default: IcoConv2D)", default='IcoConv2D')
     train_group.add_argument('--fs_path', type=str, help='Path to freesurfer folder', default=None)
-    train_group.add_argument('--num_images', type=int, help='Number of images to use for the training', default=12)
     train_group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=1)
 
     # Arguments used for prediction
@@ -625,6 +624,16 @@ def cml():
     # Arguments used for evaluation
     out_group = parser.add_argument_group('Output')
     out_group.add_argument('--out', type=str, help='Output', default="./")
+
+    ##Logger
+    logger_group = parser.add_argument_group('Logger')
+    logger_group.add_argument('--log_every_n_steps', type=int, help='Log every n steps', default=10)    
+    logger_group.add_argument('--tb_dir', type=str, help='Tensorboard output dir', default=None)
+    logger_group.add_argument('--tb_name', type=str, help='Tensorboard experiment name', default="tensorboard")
+    logger_group.add_argument('--neptune_project', type=str, help='Neptune project', default=None)
+    logger_group.add_argument('--neptune_tags', type=str, help='Neptune tags', default=None)
+    logger_group.add_argument('--neptune_token', type=str, help='Neptune token', default=None)
+    logger_group.add_argument('--num_images', type=int, help='Number of images to log', default=12)
 
     args = parser.parse_args()
     

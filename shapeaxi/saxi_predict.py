@@ -13,7 +13,7 @@ import nrrd
 import monai
 
 from shapeaxi import saxi_nets, utils
-from shapeaxi.saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiFreesurferDataset, SaxiFreesurferMPdataset
+from shapeaxi.saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiFreesurferDataset, SaxiFreesurferMPdataset, SaxiFreesurferDataset_1
 from shapeaxi.saxi_transforms import EvalTransform, UnitSurfTransform, TrainTransform, RandomRemoveTeethTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 from shapeaxi.post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
 from shapeaxi.dental_model_seg import segmentation_crown, post_processing
@@ -28,12 +28,9 @@ def SaxiSegmentation_predict(args, mount_point, df, fname, ext):
     # The dataset and corresponding data loader are initialized for evaluation purposes.
     class_weights = None
     out_channels = 34
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS.load_from_checkpoint(args.model)
     ds = SaxiDataset(df, mount_point = args.mount_point, transform=UnitSurfTransform(), surf_column="surf")
     dataloader = DataLoader(ds, batch_size=1, num_workers=args.num_workers, persistent_workers=True, pin_memory=True)
     device = torch.device('cuda')
-    model.to(device)
     model.eval()
     softmax = torch.nn.Softmax(dim=2)
 
@@ -102,6 +99,14 @@ def SaxiSegmentation_predict(args, mount_point, df, fname, ext):
 
 
 def SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model):
+    model.ico_sphere(args.radius, args.subdivision_level)
+    model.eval()
+    scale_factor = None
+    if model.hparams.scale_factor:
+        scale_factor = model.hparams.scale_factor
+    test_ds = SaxiDataset(df, transform=EvalTransform(scale_factor), **vars(args))
+    test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
+
     with torch.no_grad():
         # The prediction is performed on the test data
         probs = []
@@ -140,6 +145,14 @@ def SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, m
 
 
 def SaxiRegression_predict(args, mount_point, df, fname, ext, test_loader, model):
+    model.ico_sphere(args.radius, args.subdivision_level)
+    model.eval()
+    scale_factor = None
+    if model.hparams.scale_factor:
+        scale_factor = model.hparams.scale_factor
+    test_ds = SaxiDataset(df, transform=EvalTransform(scale_factor), **vars(args))
+    test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
+    
     with torch.no_grad():
         predictions = []
         softmax = nn.Softmax(dim=1)
@@ -168,10 +181,7 @@ def SaxiRegression_predict(args, mount_point, df, fname, ext, test_loader, model
         print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
 
 
-def SaxiIcoClassification_predict(args, mount_point, df, fname, ext):
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS.load_from_checkpoint(args.model)
-    model.to(torch.device(args.device))
+def SaxiIcoClassification_predict(args, mount_point, df, fname, ext, model):
     model.eval()
     
     list_demographic = ['Gender','MRI_Age','AmygdalaLeft','HippocampusLeft','LatVentsLeft','ICV','Crbm_totTissLeft','Cblm_totTissLeft','AmygdalaRight','HippocampusRight','LatVentsRight','Crbm_totTissRight','Cblm_totTissRight'] #MLR
@@ -226,13 +236,10 @@ def SaxiIcoClassification_predict(args, mount_point, df, fname, ext):
         print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
 
 
-def SaxiFreesurfer_predict(args, mount_point, df, fname, ext):, 
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS.load_from_checkpoint(args.model)
-    model.to(torch.device(args.device))
+def SaxiFreesurfer_predict(args, mount_point, df, fname, ext, model): 
     model.eval()
+    # test_ds = SaxiFreesurferDataset_1(df,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
     test_ds = SaxiFreesurferDataset(df,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
-        
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
     with torch.no_grad():
@@ -282,14 +289,9 @@ def SaxiFreesurfer_predict(args, mount_point, df, fname, ext):,
         print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
 
 
-def SaxiFreedurferMT_predict(args, mount_point, df, fname, ext):, 
-    SAXINETS = getattr(saxi_nets, args.nn)
-    model = SAXINETS.load_from_checkpoint(args.model)
-    model.to(torch.device(args.device))
+def SaxiFreedurferMT_predict(args, mount_point, df, fname, ext, model):
     model.eval()
-    timepoints = ['T1', 'T2', 'T3']
-    test_ds = SaxiFreesurferMPdataset(df,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
-        
+    test_ds = SaxiFreesurferDataset(df,transform=UnitSurfTransform(),name_class=args.class_column,freesurfer_path=args.fs_path)
     test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
 
     with torch.no_grad():
@@ -300,28 +302,21 @@ def SaxiFreedurferMT_predict(args, mount_point, df, fname, ext):,
 
         for idx, batch in tqdm(enumerate(test_loader), total=len(test_loader)):
             # The generated CAM is processed and added to the input surface mesh (surf) as a point data array
-            for timepoint in timepoints:
-                left_side = f'{timepoint}L'
-                right_side = f'{timepoint}R'
-                VL, FL, VFL, FFL, Y = batch[left_side]
-                VR, FR, VFR, FFR, Y = batch[right_side]
-                VL = VL.cuda(non_blocking=True,device=args.device)
-                FL = FL.cuda(non_blocking=True,device=args.device)
-                VFL = VFL.cuda(non_blocking=True,device=args.device)
-                FFL = FFL.cuda(non_blocking=True,device=args.device)
-                VR = VR.cuda(non_blocking=True,device=args.device)
-                FR = FR.cuda(non_blocking=True,device=args.device)
-                VFR = VFR.cuda(non_blocking=True,device=args.device)
-                FFR = FFR.cuda(non_blocking=True,device=args.device)
-                FFL = FFL.squeeze(0)
-                FFR = FFR.squeeze(0)
+            T1L = batch['T1L']
+            T2L = batch['T2L']
+            T3L = batch['T3L']
+            T1R = batch['T1R']
+            T2R = batch['T2R']
+            T3R = batch['T3R']
+            Y = batch['Y']
 
-                X = (VL, FL, VFL, FFL, VR, FR, VFR, FFR)
-                x = model(X)
+            # Forward pass
+            x = (T1L, T2L, T3L, T1R, T2R, T3R)
+            x = model(X)
 
-                x = softmax(x).detach()
-                probs.append(x)
-                predictions.append(torch.argmax(x, dim=1, keepdim=True))
+            x = softmax(x).detach()
+            probs.append(x)
+            predictions.append(torch.argmax(x, dim=1, keepdim=True))
 
         probs = torch.cat(probs).detach().cpu().numpy()
         predictions = torch.cat(predictions).cpu().numpy().squeeze()
@@ -343,6 +338,8 @@ def SaxiFreedurferMT_predict(args, mount_point, df, fname, ext):,
         print(bcolors.SUCCESS, f"Saving results to {out_name}", bcolors.ENDC)
 
 
+
+
 def main(args):
     # Read of the test data from a CSV or Parquet file
     mount_point = args.mount_point
@@ -355,48 +352,27 @@ def main(args):
     else:
         df = pd.read_parquet(path_to_csv)
     
-    if args.nn == "SaxiClassification" or args.nn == "SaxiRegression":
-        # The dataset and corresponding data loader are initialized for evaluation purposes.
-        SAXINETS = getattr(saxi_nets, args.nn)
-        model = SAXINETS.load_from_checkpoint(args.model)
-        model.ico_sphere(args.radius, args.subdivision_level)
-        model.to(torch.device(args.device))
-        model.eval()
-        scale_factor = None
-        if model.hparams.scale_factor:
-            scale_factor = model.hparams.scale_factor
-        test_ds = SaxiDataset(df, transform=EvalTransform(scale_factor), **vars(args))
-        test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
-
-        if args.nn == "SaxiRegression":
-            SaxiRegression_predict(args, mount_point, df, fname, ext, test_loader, model)
-        else:
-            SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model)
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS.load_from_checkpoint(args.model)
+    model.to(torch.device(args.device))
     
-    elif args.nn == "SaxiRingClassification":
-        SAXINETS = getattr(saxi_nets, args.nn)
-        model = SAXINETS.load_from_checkpoint(args.model)
-        model.to(torch.device(args.device))
-        model.eval()
-        scale_factor = None
-        if model.hparams.scale_factor:
-            scale_factor = model.hparams.scale_factor
-        test_ds = SaxiDataset(df, transform=EvalTransform(scale_factor), **vars(args))
-        test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
-        
+    if args.nn == "SaxiClassification" or args.nn == "SaxiRingClassification":
         SaxiClassification_predict(args, mount_point, df, fname, ext, test_loader, model)
+    
+    elif args.nn == "SaxiRegression":
+        SaxiRegression_predict(args, mount_point, df, fname, ext, model)
 
     elif args.nn == "SaxiSegmentation":
-        SaxiSegmentation_predict(args, mount_point, df, fname, ext) 
+        SaxiSegmentation_predict(args, mount_point, df, fname, ext, model) 
 
     elif args.nn == "SaxiIcoClassification":
-        SaxiIcoClassification_predict(args, mount_point, df, fname, ext)
+        SaxiIcoClassification_predict(args, mount_point, df, fname, ext, model)
     
-    elif args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiRing":
-        SaxiFreesurfer_predict(args, mount_point, df, fname, ext)
+    elif args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiRing" or args.nn == "SaxiMHA" or args.nn == "SaxiRing_QC":
+        SaxiFreesurfer_predict(args, mount_point, df, fname, ext, model)
     
     elif args.nn == "SaxiRingMT":
-        SaxiFreedurferMT_predict(args, mount_point, df, fname, ext)
+        SaxiFreedurferMT_predict(args, mount_point, df, fname, ext, model)
 
     else:
         raise NotImplementedError(f"Neural network {args.nn} is not implemented")             
@@ -409,7 +385,7 @@ def get_argparse():
     ##Trained
     model_group = parser.add_argument_group('Trained')
     model_group.add_argument('--model', type=str, help='Model for prediction', required=True)
-    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT'])
+    model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiRing_QC'])
 
     ##Input
     input_group = parser.add_argument_group('Input')
