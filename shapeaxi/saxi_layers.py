@@ -335,7 +335,7 @@ class Norm(nn.Module):
 
 class ProjectionHead(nn.Module):
     # Projection MLP
-    def __init__(self, input_dim=1280, hidden_dim=1280, output_dim=128):
+    def __init__(self, input_dim=1280, hidden_dim=1280, output_dim=128, dropout=0.1):
         super().__init__()
         self.output_dim = output_dim
         self.input_dim = input_dim
@@ -343,9 +343,9 @@ class ProjectionHead(nn.Module):
 
         self.model = nn.Sequential(
             nn.Linear(self.input_dim, self.hidden_dim, bias=False),
-            nn.Tanh(),
+            nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(self.hidden_dim, self.output_dim, bias=False),
-            Norm()
         )
 
     def forward(self, x):
@@ -400,7 +400,7 @@ class MHA(nn.Module):
         return attn_output
     
 class MHA_KNN(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, return_weights=False, K=6, return_sorted=True, random=False, return_v=False):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, return_weights=False, K=6, return_sorted=True, random=False, return_v=False, use_direction=True):
         super(MHA_KNN, self).__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -410,6 +410,7 @@ class MHA_KNN(nn.Module):
         self.random = random
         self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
         self.return_v = return_v
+        self.use_direction = use_direction
     
     def forward(self, x):
 
@@ -440,7 +441,10 @@ class MHA_KNN(nn.Module):
         # the intuition here is that based on the query and key embeddings, the model will learn to predict
         # the best direction to move the new embedding, i.e., create a new point in the point cloud
         # the shape of v is [BS, V_n, K, Embed_dim]
-        v = k - q
+        if self.use_direction:
+            v = k - q
+        else:
+            v = k
 
         q = q.contiguous().view(batch_size * V_n, 1, Embed_dim) # Original point with dimension 1 added
         k = k.contiguous().view(batch_size * V_n, self.K, Embed_dim)

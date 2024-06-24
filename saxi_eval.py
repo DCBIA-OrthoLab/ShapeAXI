@@ -17,14 +17,13 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import itertools
-from scipy import interp
+
 import pickle 
 import plotly.graph_objects as go
 import plotly.express as px
 
 from shapeaxi import utils
 from shapeaxi.colors import bcolors
-from shapeaxi.saxi_train import SaxiIcoClassification_train
 
 # This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
@@ -99,7 +98,6 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
       y_pred_arr.append(row[args.csv_prediction_column])
 
     report = classification_report(y_true_arr, y_pred_arr, output_dict=True, zero_division=1)
-    print(json.dumps(report, indent=2))
 
     cnf_matrix = confusion_matrix(y_true_arr, y_pred_arr)
     np.set_printoptions(precision=3)
@@ -139,6 +137,7 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
       )
 
       for i in range(y_scores.shape[1]):
+      # for i in range(2):
 
           y_true = y_onehot.iloc[:, i]
           y_score = y_scores[:, i]
@@ -182,6 +181,8 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
       df_report = pd.DataFrame(report).transpose()
       report_filename = os.path.splitext(path_to_csv)[0] + "_classification_report.csv"
       df_report.to_csv(report_filename)
+
+      print(json.dumps(report, indent=2))
 
       # Extraction of the score (AUC or F1)
       score = choose_score(args,report)

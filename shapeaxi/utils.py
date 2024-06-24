@@ -1067,6 +1067,9 @@ def SmoothPolyData(surf, iterations=15, relaxation_factor=0.1):
 def ArrayToTensor(vtkarray, device='cpu', dtype=torch.int64):
     return ToTensor(dtype=dtype, device=device)(vtk_to_numpy(vtkarray))
 
+def TensorToArray(t):
+    return numpy_to_vtk(t.cpu().numpy())
+
 def PolyDataToTensors(surf, device='cpu'):
 
     verts, faces, edges = PolyDataToNumpy(surf)

@@ -1564,7 +1564,7 @@ class SaxiRingClassification(LightningModule):
 
         cameras = PerspectiveCameras()
 
-        raster_settings = RasterizationSettings(image_size=self.hparams.image_size, blur_radius=0, faces_per_pixel=1,max_faces_per_bin=None)        
+        raster_settings = RasterizationSettings(image_size=self.hparams.image_size, blur_radius=0, faces_per_pixel=1,max_faces_per_bin=200000)        
         rasterizer = MeshRasterizer(cameras=cameras, raster_settings=raster_settings)
         lights = AmbientLights()
         self.renderer = MeshRenderer(rasterizer=rasterizer,shader=HardPhongShader(cameras=cameras, lights=lights))
@@ -1607,8 +1607,39 @@ class SaxiRingClassification(LightningModule):
                 ico_verts[idx] = v + torch.tensor([-1.2447e-05, -3.7212e-06, -1.5617e-06])
         
         self.register_buffer("ico_verts", ico_verts)
+    
+    def create_mesh(self, V, F, CN=None):
+        
+        if CN is not None:
+            textures = TexturesVertex(verts_features=CN.to(torch.float32))
+            return Meshes(verts=V, faces=F, textures=textures)
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        if return_normals:
+            x, x_N = sample_points_from_meshes(x_mesh, Ns, return_normals=True)
+            return x, x_N
+        return sample_points_from_meshes(x_mesh, Ns)
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiRingClassification")
 
+        group.add_argument("--lr", type=float, default=1e-4)
+        
+        # Encoder parameters
+        group.add_argument('--base_encoder', type=str, help='Base encoder for the feature extraction', default='resnet18')
+        group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512')
+        group.add_argument('--hidden_dim', type=int, help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', default=512)
+        group.add_argument('--out_size', type=int, help='Output size for the attention', default=256)
+        group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.2)
+        group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=3)
+        group.add_argument('--image_size', type=int, help='Image resolution size', default=128)
+        group.add_argument('--dropout_lvl', type=float, help='Dropout', default=0.1)
+        group.add_argument('--out_classes', type=int, help='Output number of classes', default=4)
 
+        return parent_parser
+    
     def configure_optimizers(self):
         # Configure the optimizer
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -1954,7 +1985,7 @@ class SaxiMHAEncoder(nn.Module):
         self.embedding = nn.Linear(input_dim, embed_dim)
 
         for i, sl in enumerate(sample_levels):
-            setattr(self, f"mha_{i}", MHA_KNN(embed_dim=embed_dim, num_heads=num_heads, K=K, dropout=dropout))
+            setattr(self, f"mha_{i}", MHA_KNN(embed_dim=embed_dim, num_heads=num_heads, K=K, return_weights=True, dropout=dropout))
             setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim, hidden_dim=hidden_dim, dropout=dropout)))
         
         self.output = nn.Linear(embed_dim, output_dim)
@@ -1983,21 +2014,36 @@ class SaxiMHAEncoder(nn.Module):
     def forward(self, x):
         
         x = self.embedding(x)
+
+        weights = torch.zeros(x.shape[0], x.shape[1], device=x.device)
+        idx = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)
+        
+        indices = []
         
         for i, sl in enumerate(self.sample_levels):
             
             if i > 0:
                 # select the first sl points a.k.a. downsample/pooling                
-                x, _ = self.sample_points(x, sl)
+                x, x_i = self.sample_points(x, sl)
+
+                # initialize idx with the index of the current level
+                idx = x_i
+                
+                for idx_prev in reversed(indices): # go through the list of the previous ones in reverse
+                    idx = knn_gather(idx_prev, idx).squeeze(-2).contiguous() # using the indices of the previous level update idx, at the end idx should have the indices of the first level
+                
+                idx = idx.squeeze(-1)
+                indices.append(x_i)
             
             # the mha will select optimal points from the input
-            x = getattr(self, f"mha_{i}")(x)
+            x, x_w = getattr(self, f"mha_{i}")(x)
             x = getattr(self, f"ff_{i}")(x)
-                
+            
+            weights.scatter_add_(1, idx, x_w)
 
         #output layer
         x = self.output(x)
-        return x
+        return x, weights
     
 
 class SaxiMHADecoder(nn.Module):
@@ -2184,7 +2230,7 @@ class SaxiAE(LightningModule):
         return z_vae
 
     def forward(self, X):        
-        h = self.encoder(X)
+        h, w = self.encoder(X)
         z_mu = self.ff_mu(h)
         z_sigma = self.ff_sigma(h)
         z = self.sampling(z_mu, z_sigma)
@@ -2273,12 +2319,12 @@ class SaxiMHAClassification(LightningModule):
 
     def forward(self, X_mesh):
         X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[-1])
-        x = self.encoder(X)
+        x, x_w = self.encoder(X)
         x, x_v = self.mha(x)
         x = torch.cat([x, x_v], dim=1)
         x = self.flatten(x)
         x = self.fc(x)
-        return x
+        return x, x_w
     
 
 class SaxiMHAFBClassification(LightningModule):
@@ -2322,7 +2368,7 @@ class SaxiMHAFBClassification(LightningModule):
         
     @staticmethod
     def add_model_specific_args(parent_parser):
-        group = parent_parser.add_argument_group("SaxiAE")
+        group = parent_parser.add_argument_group("SaxiMHBFB Classification")
 
         group.add_argument("--lr", type=float, default=1e-4)
         group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
@@ -2413,7 +2459,7 @@ class SaxiMHAFBClassification(LightningModule):
         V, F, CN, Y = train_batch
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat = self(X_mesh)
+        X_hat, _, _ = self(X_mesh)
         loss = self.compute_loss(X_hat, Y)
         
         self.log("train_loss", loss)       
@@ -2427,7 +2473,7 @@ class SaxiMHAFBClassification(LightningModule):
         V, F, CN, Y = val_batch
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat = self(X_mesh)
+        X_hat, _, _ = self(X_mesh)
 
         loss = self.compute_loss(X_hat, Y)
         
@@ -2436,8 +2482,9 @@ class SaxiMHAFBClassification(LightningModule):
         self.log("val_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True)
 
     def forward(self, X_mesh):
-        X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[-1])
-        x = self.encoder(X)
+        X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        
+        x, x_w = self.encoder(X)        
         x = self.ff(x)
         x, x_s = self.attn(x, x)        
 
@@ -2451,7 +2498,7 @@ class SaxiMHAFBClassification(LightningModule):
         x = torch.cat([x, x_fb], dim=1)
 
         x = self.fc(x)
-        return x
+        return x, x_w, X
     
 
 class SaxiD(LightningModule):
@@ -2605,3 +2652,105 @@ class SaxiD(LightningModule):
 
     def forward(self, X):                
         return self.decoder(X)
+    
+
+
+class SaxiMHAClassificationSingle(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()        
+        
+        self.mlp_in = ProjectionHead(self.hparams.input_dim, hidden_dim=self.hparams.hidden_dim, output_dim=self.hparams.embed_dim, dropout=self.hparams.dropout)
+        self.mha = MHA_KNN(embed_dim=self.hparams.embed_dim, num_heads=self.hparams.num_heads, K=self.hparams.K, dropout=self.hparams.dropout, use_direction=False, return_weights=True)
+        self.ff = Residual(FeedForward(self.hparams.embed_dim, hidden_dim=self.hparams.hidden_dim, dropout=self.hparams.dropout))
+        self.mlp_out = ProjectionHead(self.hparams.embed_dim, hidden_dim=self.hparams.hidden_dim, output_dim=self.hparams.output_dim, dropout=self.hparams.dropout)
+        
+        self.fc = nn.Linear(self.hparams.output_dim, self.hparams.num_classes)
+        self.loss = nn.CrossEntropyLoss()
+
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.num_classes)
+        
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiAE")
+
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
+        
+        # Encoder parameters
+        
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--hidden_dim", type=int, default=64, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=128, help='Embedding dimension')
+        group.add_argument("--K", type=int, default=1024, help='Top K nearest neighbors to consider in the encoder')
+        group.add_argument("--num_heads", type=int, default=128, help='Number of attention heads for the encoder')
+        group.add_argument("--output_dim", type=int, default=128, help='Output dimension from the encoder')        
+        group.add_argument("--sample_level", type=int, default=1024, help='Sampling level')                
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        
+        # classification parameters
+        group.add_argument("--num_classes", type=int, default=None, help='Number of output classes', required=True)
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F, CN=None):
+        
+        if CN is not None:
+            textures = TexturesVertex(verts_features=CN.to(torch.float32))
+            return Meshes(verts=V, faces=F, textures=textures)
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        if return_normals:
+            x, x_N = sample_points_from_meshes(x_mesh, Ns, return_normals=True)
+            return x, x_N
+        return sample_points_from_meshes(x_mesh, Ns)
+
+    def compute_loss(self, X_hat, Y):
+        return self.loss(X_hat, Y)
+
+    def training_step(self, train_batch, batch_idx):
+        V, F, CN, Y = train_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, _ = self(X_mesh)
+        loss = self.compute_loss(X_hat, Y)
+        
+        batch_size = V.shape[0]
+        self.log("train_loss", loss, batch_size=batch_size)
+        self.accuracy(X_hat, Y)
+        self.log("train_acc", self.accuracy, batch_size=batch_size)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        V, F, CN, Y = val_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_hat, Y)
+        
+        batch_size = V.shape[0]
+        self.log("val_loss", loss, sync_dist=True, batch_size=batch_size)
+        self.accuracy(X_hat, Y)
+        self.log("val_acc", self.accuracy, batch_size=batch_size)
+
+    def forward(self, X_mesh):
+        x = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+        
+        x = self.mlp_in(x)
+        x, x_w = self.mha(x)
+        x = self.ff(x)
+        x = self.mlp_out(x)
+        x = torch.mean(x, dim=1)
+        x = self.fc(x)
+
+        return x, x_w

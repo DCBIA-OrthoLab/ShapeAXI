@@ -67,7 +67,7 @@ class SaxiDataset(Dataset):
         if self.CN:
             surf = utils.ComputeNormals(surf)
             color_normals = torch.tensor(vtk_to_numpy(utils.GetColorArray(surf, "Normals"))).to(torch.float32)/255.0
-
+        
         if self.surf_property:            
             faces_pid0 = faces[:,0:1]
             surf_point_data = surf.GetPointData().GetScalars(self.surf_property)
@@ -94,6 +94,8 @@ class SaxiDataset(Dataset):
     def getSurf(self, idx):
         surf_path = os.path.join(self.mount_point, self.df.iloc[idx][self.surf_column])
         return utils.ReadSurf(surf_path)
+    def getSurfPath(self, idx):
+        return self.df.iloc[idx][self.surf_column]
 
 
 class SaxiDataModule(LightningDataModule):
@@ -145,6 +147,15 @@ class SaxiDataModule(LightningDataModule):
             color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)            
             
             return verts, faces, color_normals
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, shuffle=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
         
 
 class SaxiDataModuleVF(LightningDataModule):
@@ -174,14 +185,25 @@ class SaxiDataModuleVF(LightningDataModule):
 
     def pad_verts_faces(self, batch):
         # Collate function for the dataloader to know how to comine the data
-        
-        verts = [v for v, f  in batch]
-        faces = [f for v, f in batch]
-        
-        verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
-        faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+
+        if self.class_column:
+            verts = [v for v, f, c  in batch]
+            faces = [f for v, f, c in batch]
+            classes = [c for v, f, c in batch]  
             
-        return verts, faces
+            verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
+            faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+                
+            return verts, faces, torch.tensor(classes)
+        else:
+        
+            verts = [v for v, f  in batch]
+            faces = [f for v, f in batch]
+            
+            verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
+            faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+                
+            return verts, faces
 
 
     def train_dataloader(self):
