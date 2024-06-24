@@ -1,5 +1,4 @@
-
-![ShapeAXI Logo](doc/images/Logo_ShapeAXI.png)
+<img src="doc/images/Logo_ShapeAXI.png" alt="ShapeAXI Logo" width="200" height="200">
 
 # ShapeAXI
 
