@@ -319,7 +319,6 @@ class SaxiFreesurferDataset(Dataset):
     def getitem_per_hemisphere(self, hemisphere, idx):
         row = self.df.loc[idx]
         sub_session = '_' + row['eventname']
-        print(row['Subject_ID'], row['eventname'])
         path_to_fs_data = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf')
 
         # Load Data
