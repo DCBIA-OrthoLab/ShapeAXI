@@ -119,74 +119,66 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
 
 
     probs_fn = args.csv.replace("_prediction.csv", "_probs.pickle")
-
+    
     if os.path.exists(probs_fn) and os.path.splitext(probs_fn)[1] == ".pickle":
+        
+        with open(probs_fn, 'rb') as f:
+            y_scores = pickle.load(f)
+            print("Loaded probabilities from", probs_fn)
 
-      with open(probs_fn, 'rb') as f:
-        y_scores = pickle.load(f)
+        y_onehot = pd.get_dummies(y_true_arr)
 
-      y_onehot = pd.get_dummies(y_true_arr)
+        fig = go.Figure()
+        fig.add_shape(
+            type='line', line=dict(dash='dash'),
+            x0=0, x1=1, y0=0, y1=1
+        )
 
+        for i in range(y_scores.shape[1]):
+            y_true = y_onehot.iloc[:, i]
+            y_score = y_scores[:, i]
 
-      # Create an empty figure, and iteratively add new lines
-      # every time we compute a new class
-      fig = go.Figure()
-      fig.add_shape(
-          type='line', line=dict(dash='dash'),
-          x0=0, x1=1, y0=0, y1=1
-      )
+            fpr, tpr, _ = roc_curve(y_true, y_score)
+            auc_score = roc_auc_score(y_true, y_score)
+            report.get(str(i), {})["auc"] = auc_score
 
-      for i in range(y_scores.shape[1]):
-      # for i in range(2):
+            name = f"{y_onehot.columns[i]} (AUC={auc_score:.2f})"
+            fig.add_trace(go.Scatter(x=fpr, y=tpr, name=name, mode='lines'))
 
-          y_true = y_onehot.iloc[:, i]
-          y_score = y_scores[:, i]
+        fig.update_layout(
+            xaxis_title='False Positive Rate',
+            yaxis_title='True Positive Rate',
+            yaxis=dict(scaleanchor="x", scaleratio=1),
+            xaxis=dict(constrain='domain'),
+            width=700, height=500
+        )
 
-          fpr, tpr, _ = roc_curve(y_true, y_score)
-          auc_score = roc_auc_score(y_true, y_score)
-       
-          report.get(str(i), {})["auc"] = auc_score
+        roc_filename = os.path.splitext(path_to_csv)[0] + "_roc.png"
+      
+        fig.write_image(roc_filename)
 
-          name = f"{y_onehot.columns[i]} (AUC={auc_score:.2f})"
-          fig.add_trace(go.Scatter(x=fpr, y=tpr, name=name, mode='lines'))
+        support = []
+        auc = []
+        for i in range(y_scores.shape[1]):
+            support.append(report.get(str(i), {}).get("support", 0))
+            auc.append(report.get(str(i), {}).get("auc", 0))
 
-      fig.update_layout(
-          xaxis_title='False Positive Rate',
-          yaxis_title='True Positive Rate',
-          yaxis=dict(scaleanchor="x", scaleratio=1),
-          xaxis=dict(constrain='domain'),
-          width=700, height=500
-      )
+        support = np.array(support)
+        auc = np.array(auc)
 
-      roc_filename = os.path.splitext(path_to_csv)[0] + "_roc.png"
+        if np.sum(support) != 0:
+            report["weighted avg"]["auc"] = np.average(auc, weights=support)
+        else:
+            report["weighted avg"]["auc"] = 0
 
-      fig.write_image(roc_filename)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.splitext(path_to_csv)[0] + "_classification_report.csv"
+        df_report.to_csv(report_filename)
+        print(json.dumps(report, indent=4))
+        print(f"Saved classification report to {report_filename}")
 
-      support = []
-      auc = []
-      for i in range(y_scores.shape[1]):
-          support.append(report.get(str(i), {}).get("support", 0))
-          auc.append(report.get(str(i), {}).get("auc", 0))
-
-      support = np.array(support)
-      auc = np.array(auc)
-
-      if np.sum(support) != 0:
-          report["weighted avg"]["auc"] = np.average(auc, weights=support)
-          report["weighted avg"]["auc"] = np.average(auc, weights=support) 
-      else:
-          report["weighted avg"]["auc"] = 0
-          report["weighted avg"]["auc"] = 0
-          
-      df_report = pd.DataFrame(report).transpose()
-      report_filename = os.path.splitext(path_to_csv)[0] + "_classification_report.csv"
-      df_report.to_csv(report_filename)
-
-      print(json.dumps(report, indent=2))
-
-      # Extraction of the score (AUC or F1)
-      score = choose_score(args,report)
-      return score
+        score = choose_score(args, report)
+        return score
 
 
 #####################################################################################################################################################################################
@@ -334,7 +326,7 @@ def main(args):
     else:        
         df = pd.read_parquet(path_to_csv)
 
-    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs" or args.nn == 'SaxiRing' or args.nn == 'SaxiRingClassification':
+    if args.nn == "SaxiClassification" or args.nn == "SaxiIcoClassification" or args.nn == "SaxiIcoClassification_fs" or args.nn == 'SaxiRing' or args.nn == 'SaxiRingClassification' or args.nn == 'SaxiRingMT' or args.nn == 'SaxiMHA':
       score = SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv)
 
     elif args.nn == "SaxiSegmentation":
@@ -358,7 +350,7 @@ def get_argparse():
   parser.add_argument('--class_column', type=str, help='Which column to do the stats on', default='class')
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification'])
+  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingMT', 'SaxiRingClassification', 'SaxiMHA'])
   parser.add_argument('--title', type=str, help='Title for the image', default='Confusion matrix')
   parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')

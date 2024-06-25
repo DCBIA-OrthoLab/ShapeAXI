@@ -17,10 +17,22 @@ from sklearn.utils import class_weight
 torch.set_float32_matmul_precision('high')
 
 
-from shapeaxi.saxi_dataset import SaxiDataModule, SaxiIcoDataModule, SaxiFreesurferDataModule, SaxiFreesurferMPDataModule
+##
+import monai
+from monai.data import DataLoader as monai_DataLoader
+from torch.nn.utils.rnn import pad_sequence
+
+from pytorch3d.renderer import (
+        TexturesVertex
+)
+from pytorch3d.structures import Meshes
+##
+
+from shapeaxi.saxi_dataset import SaxiDataModule, SaxiIcoDataModule, SaxiFreesurferDataModule, SaxiFreesurferMPDataModule, SaxiFreesurferDataModule_1_feature, SaxiFreesurferDataModule_2_feature, SaxiFreesurferDataset
 from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 from shapeaxi import saxi_nets
-from shapeaxi.saxi_logger import SaxiImageLoggerTensorboard, SaxiImageLoggerTensorboardSegmentation, SaxiImageLoggerTensorboardIco, SaxiImageLoggerTensorboardIco_fs, SaxiImageLoggerNeptune, SaxiImageLoggerNeptune_Ico_fs
+from shapeaxi.saxi_nets import MonaiUNet, SaxiIcoClassification
+from shapeaxi.saxi_logger import SaxiImageLoggerTensorboard, SaxiImageLoggerTensorboardSegmentation, SaxiImageLoggerTensorboardIco, SaxiImageLoggerTensorboardIco_fs, SaxiImageLoggerNeptune, SaxiImageLoggerNeptune_Ico_fs, SaxiImageLoggerNeptune_Ico_one_feature
 
 
 def logger_neptune_tensorboard(args):
@@ -42,11 +54,15 @@ def logger_neptune_tensorboard(args):
         logger = NeptuneLogger(
             project=args.neptune_project,
             tags=args.neptune_tags,
-            api_key=os.environ['NEPTUNE_API_TOKEN']
+            api_key=args.neptune_token,
         )
 
         if args.nn == "SaxiIcoClassification_fs" or args.nn == "SaxiRing":
             image_logger = SaxiImageLoggerNeptune_Ico_fs(num_images=args.num_images)
+        elif args.nn == "SaxiMHA":
+            image_logger = SaxiImageLoggerNeptune_Ico_fs(num_images=args.num_images)
+        elif args.nn == "SaxiRingMT":
+            SaxiImageLoggerNeptune_SaxiRingMT(num_images=args.num_images)
         else:
             image_logger = SaxiImageLoggerNeptune(num_images=args.num_images)
 
@@ -98,7 +114,6 @@ def SaxiIcoClassification_train(args, checkpoint_callback, mount_point, train, v
     list_train_transform.append(NormalizePointTransform())
     list_train_transform.append(RandomRotationTransform())        
     list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) #Do not use this transformation if your object is not a sphere
-    list_train_transform.append(NormalizePointTransform()) #Do not use this transformation if your object is not a sphere
     train_transform = monai.transforms.Compose(list_train_transform)
 
     list_val_and_test_transform = []    
@@ -223,6 +238,112 @@ def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, ear
         #Use of SaxiRingMT
         data = SaxiFreesurferMPDataModule(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
 
+    saxi_args['out_classes'] = len(nb_classes)  
+    saxi_args['out_size'] = 256
+
+    print("Number of classes:",len(nb_classes))
+
+    # train = SaxiFreesurferDataset(df_train,train_transform,args.class_column,freesurfer_path=args.fs_path)
+
+    # train_batch = monai_DataLoader(train,batch_size=1, shuffle=False, num_workers=0, pin_memory=True, drop_last=True, collate_fn=pad_verts_faces)
+
+    # for batch in train_batch:
+    #     VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
+        
+        # textures_l = TexturesVertex(verts_features=VL[:, :, :3])
+        # meshes = Meshes(
+        #     verts=VL,
+        #     faces=FL,
+        #     textures=textures_l
+        # )
+
+        # textures_r = TexturesVertex(verts_features=VR[:, :, :3])
+        # meshes = Meshes(
+        #     verts=VR,
+        #     faces=FR,
+        #     textures=textures_r
+        # )
+
+    data.setup()
+
+    for batch in data.train_dataloader():
+        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
+        
+        textures_l = TexturesVertex(verts_features=VL[:, :, :3])
+        meshes = Meshes(
+            verts=VL,
+            faces=FL,
+            textures=textures_l
+        )
+
+        textures_r = TexturesVertex(verts_features=VR[:, :, :3])
+        meshes = Meshes(
+            verts=VR,
+            faces=FR,
+            textures=textures_r
+        )
+
+    quit()
+
+    #Creation of our model
+    SAXINETS = getattr(saxi_nets, args.nn)
+    model = SAXINETS(**saxi_args)
+
+    callbacks = [early_stop_callback, checkpoint_callback]
+    logger, image_logger = logger_neptune_tensorboard(args)
+
+    if image_logger:
+        callbacks.append(image_logger)
+
+    trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count(), accumulate_grad_batches=7, strategy='ddp')
+    trainer.fit(model,datamodule=data,ckpt_path=args.model)
+
+
+def pad_verts_faces(batch):
+    verts_l = [vl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    faces_l = [fl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    vertex_features_l = [vfl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    face_features_l = [ffl for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    verts_r = [vr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    faces_r = [fr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    vertex_features_r = [vfr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    face_features_r = [ffr for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]
+    Y = [y for vl, fl, vfl, ffl, vr, fr, vfr, ffr, y in batch]     
+
+    verts_l = pad_sequence(verts_l, batch_first=True, padding_value=0.0) 
+    faces_l = pad_sequence(faces_l, batch_first=True, padding_value=-1)
+    vertex_features_l = pad_sequence(vertex_features_l, batch_first=True, padding_value=0.0)
+    face_features_l = torch.cat(face_features_l)
+    verts_r = pad_sequence(verts_r, batch_first=True, padding_value=0.0)
+    faces_r = pad_sequence(faces_r, batch_first=True, padding_value=-1)
+    vertex_features_r = pad_sequence(vertex_features_r, batch_first=True, padding_value=0.0)
+    face_features_r = torch.cat(face_features_r)
+    Y = torch.tensor(Y)
+
+    return verts_l, faces_l, vertex_features_l, face_features_l, verts_r, faces_r, vertex_features_r, face_features_r, Y
+
+
+def SaxiMHA_train(args, checkpoint_callback, mount_point, train, val, test, early_stop_callback):
+    #Transformation
+    list_train_transform = [] 
+    list_train_transform.append(CenterTransform())
+    list_train_transform.append(NormalizePointTransform())
+    list_train_transform.append(RandomRotationTransform())        
+    list_train_transform.append(GaussianNoisePointTransform(args.mean,args.std)) #Do not use this transformation if your object is not a sphere
+    train_transform = monai.transforms.Compose(list_train_transform)
+
+    list_val_and_test_transform = []    
+    list_val_and_test_transform.append(CenterTransform())
+    list_val_and_test_transform.append(NormalizePointTransform())
+    val_and_test_transform = monai.transforms.Compose(list_val_and_test_transform)
+
+    saxi_args = vars(args)
+
+    df_train = pd.read_csv(train)
+    unique_classes = np.sort(np.unique(df_train[args.class_column]))
+    nb_classes = np.array(class_weight.compute_class_weight(class_weight='balanced', classes=unique_classes, y=df_train[args.class_column])) 
+   
+    data = SaxiFreesurferDataModule_2_feature(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
     
     saxi_args['out_classes'] = len(nb_classes)  
     saxi_args['out_size'] = 256
@@ -239,7 +360,7 @@ def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, ear
     if image_logger:
         callbacks.append(image_logger)
 
-    trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count())
+    trainer = Trainer(log_every_n_steps=args.log_every_n_steps,logger=logger,max_epochs=args.epochs,callbacks=callbacks,accelerator="gpu", devices=torch.cuda.device_count(), accumulate_grad_batches=7, strategy='ddp')
     trainer.fit(model,datamodule=data,ckpt_path=args.model)
 
 
@@ -279,6 +400,9 @@ def main(args):
     elif args.nn == "SaxiRing" or args.nn == "SaxiRingClassification" or args.nn == "SaxiRingMT":
         SaxiRing_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
     
+    elif args.nn == "SaxiMHA":
+        SaxiMHA_train(args, checkpoint_callback, mount_point, path_train, path_val, path_test, early_stop_callback)
+
     else:
         raise ValueError ("Unknown neural network name: {}, choose between SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification".format(args.nn))
 
@@ -306,7 +430,7 @@ def get_argparse():
 
     ##Hyperparameters
     hyper_group = parser.add_argument_group('Hyperparameters')
-    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", "SaxiRing", "SaxiRingClassification", "SaxiRingMT"])
+    hyper_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=["SaxiClassification", "SaxiRegression", "SaxiSegmentation", "SaxiIcoClassification", "SaxiIcoClassification_fs", "SaxiRing", "SaxiRingClassification", "SaxiRingMT", "SaxiMHA"])
     hyper_group.add_argument('--base_encoder', type=str, help='Base encoder for the feature extraction', default='resnet18')
     hyper_group.add_argument('--base_encoder_params', type=str, help='Base encoder parameters that are passed to build the feature extraction', default='pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512')
     hyper_group.add_argument('--hidden_dim', type=int, help='Hidden dimension for features output. Should match with output of base_encoder. Default value is 512', default=512)
@@ -336,6 +460,7 @@ def get_argparse():
     logger_group.add_argument('--tb_name', type=str, help='Tensorboard experiment name', default="tensorboard")
     logger_group.add_argument('--neptune_project', type=str, help='Neptune project', default=None)
     logger_group.add_argument('--neptune_tags', type=str, help='Neptune tags', default=None)
+    logger_group.add_argument('--neptune_token', type=str, help='Neptune token', default=None)
     logger_group.add_argument('--num_images', type=int, help='Number of images to log', default=12)
 
     ##Output

@@ -1,3 +1,5 @@
+<img src="doc/images/Logo_ShapeAXI.png" alt="ShapeAXI Logo" width="200" height="200">
+
 # ShapeAXI
 
 Welcome to the official documentation for **ShapeAXI**. Dive into the cutting-edge framework designed for comprehensive shape analysis.  
