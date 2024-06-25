@@ -28,10 +28,7 @@ from pytorch3d.ops import (sample_points_from_meshes,
 from pytorch3d.loss import (
     chamfer_distance,
     point_mesh_edge_distance, 
-    point_mesh_face_distance,
-    mesh_edge_loss, 
-    mesh_laplacian_smoothing, 
-    mesh_normal_consistency,
+    point_mesh_face_distance
 )
 
 import json
@@ -1253,10 +1250,11 @@ class DentalModelSeg(LightningModule):
 class AttentionRing(nn.Module):
     def __init__(self, in_units, out_units, neigh_orders):
         super().__init__()
+        self.num_heads = 8
         # neigh_order: (Nviews previous level, Neighbors next level)
         self.neigh_orders = neigh_orders
         #MHA
-        
+        # self.MHA = MultiHeadAttentionModule(in_units, self.num_heads, batch_first=True)
         self.Att = SelfAttention(in_units, out_units, dim=2)
 
     def forward(self, query, values):
@@ -1273,6 +1271,7 @@ class AttentionRing(nn.Module):
         query = query[:, self.neigh_orders] # (batch, Nv_{n-1}, Idx_{n}, features)
         values = values[:, self.neigh_orders] # (batch, Nv_{n-1}, Idx_{n}, features)
 
+        # x, _ = self.MHA(query, values, values)
         context_vector, score = self.Att(query, values)
 
         return context_vector, score
@@ -1431,15 +1430,18 @@ class SaxiRing(LightningModule):
         x, _ = getattr(self, f'Attention{side}')(x,values)
         
         return x
+    
 
 
     def render(self,V,F,VF,FF):
-        textures = TexturesVertex(verts_features=VF[:, :, :3])
-        meshes = Meshes(
-            verts=V,
-            faces=F,
-            textures=textures
-        )
+        # textures = TexturesVertex(verts_features=VF[:, :, :3])
+
+        dummy_textures = [torch.ones((v.shape[0], 3), device=v.device) for v in V]  # (V, C) for each mesh
+        dummy_textures = torch.stack(dummy_textures)  # (N, V, C)
+
+        textures = Textures(verts_rgb=dummy_textures)
+        meshes = Meshes(verts=V, faces=F, textures=textures)
+
         PF = []
         for i in range(self.nbr_cam):
             pix_to_face = self.GetView(meshes,i)

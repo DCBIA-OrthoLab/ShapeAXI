@@ -264,26 +264,26 @@ def SaxiRing_train(args, checkpoint_callback, mount_point, train, val, test, ear
         #     textures=textures_r
         # )
 
-    data.setup()
+    # data.setup()
 
-    for batch in data.train_dataloader():
-        VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
+    # for batch in data.train_dataloader():
+    #     VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = batch
         
-        textures_l = TexturesVertex(verts_features=VL[:, :, :3])
-        meshes = Meshes(
-            verts=VL,
-            faces=FL,
-            textures=textures_l
-        )
+    #     textures_l = TexturesVertex(verts_features=VL[:, :, :3])
+    #     meshes = Meshes(
+    #         verts=VL,
+    #         faces=FL,
+    #         textures=textures_l
+    #     )
 
-        textures_r = TexturesVertex(verts_features=VR[:, :, :3])
-        meshes = Meshes(
-            verts=VR,
-            faces=FR,
-            textures=textures_r
-        )
+    #     textures_r = TexturesVertex(verts_features=VR[:, :, :3])
+    #     meshes = Meshes(
+    #         verts=VR,
+    #         faces=FR,
+    #         textures=textures_r
+    #     )
 
-    quit()
+    # quit()
 
     #Creation of our model
     SAXINETS = getattr(saxi_nets, args.nn)
