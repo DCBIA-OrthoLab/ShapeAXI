@@ -51,6 +51,7 @@ class SaxiDataset(Dataset):
         self.surf_column = surf_column
         self.surf_property = surf_property
         self.class_column = class_column
+        self.scalar_column = scalar_column
         self.CN = CN
 
     def __len__(self):
@@ -87,6 +88,13 @@ class SaxiDataset(Dataset):
                 return verts, faces, color_normals, cl
             else:
                 return verts, faces, cl
+            
+        if self.scalar_column:
+            scalar = torch.tensor(self.df.iloc[idx][self.scalar_column], dtype=torch.float32)
+            if self.CN:
+                return verts, faces, color_normals, scalar
+            else:
+                return verts, faces, scalar
 
         if self.CN:
             return verts, faces, color_normals
@@ -126,7 +134,7 @@ class SaxiDataModule(LightningDataModule):
 
     def pad_verts_faces(self, batch):
         # Collate function for the dataloader to know how to comine the data
-        if self.class_column:
+        if self.class_column or self.scalar_column:
             verts = [v for v, f, cn, l in batch]
             faces = [f for v, f, cn, l in batch]        
             color_normals = [cn for v, f, cn, l in batch]
@@ -138,6 +146,7 @@ class SaxiDataModule(LightningDataModule):
             labels = torch.tensor(labels)
             
             return verts, faces, color_normals, labels
+        
         else:
             verts = [v for v, f, cn in batch]
             faces = [f for v, f, cn in batch]        
@@ -862,7 +871,7 @@ class SaxiFreesurferDataset_1(Dataset):
             return utils.ReadSurf(lh_inflated_path), utils.ReadSurf(rh_inflated_path), os.path.join(row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'lh_inflated.vtk'), os.path.join(row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'rh_inflated.vtk')
 
 
-class SaxiFreesurferDataModule_1_feature(pl.LightningDataModule):
+class SaxiFreesurferDataModule_1_feature(LightningDataModule):
     def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 
@@ -1033,7 +1042,7 @@ class SaxiFreesurferDataset_2(Dataset):
             return utils.ReadSurf(lh_inflated_path), utils.ReadSurf(rh_inflated_path), os.path.join(row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'lh_inflated.vtk'), os.path.join(row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'rh_inflated.vtk')
 
 
-class SaxiFreesurferDataModule_2_feature(pl.LightningDataModule):
+class SaxiFreesurferDataModule_2_feature(LightningDataModule):
     def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
         super().__init__()
         self.batch_size = batch_size 
