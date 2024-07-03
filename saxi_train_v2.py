@@ -7,7 +7,7 @@ import numpy as np
 
 import torch
 
-from shapeaxi.saxi_dataset import SaxiDataModuleVF 
+from shapeaxi.saxi_dataset import SaxiDataModule, SaxiDataModuleVF
 from shapeaxi.saxi_transforms import TrainTransform, EvalTransform
 from shapeaxi import saxi_nets
 from shapeaxi import saxi_logger
@@ -35,9 +35,10 @@ def main(args):
     NN = getattr(saxi_nets, args.nn)    
     model = NN(**vars(args))
 
-    train_transform = TrainTransform()
-    valid_transform = EvalTransform()
-    lotus_data = SaxiDataModuleVF(df_train, df_val, df_val, mount_point=args.mount_point, batch_size=args.batch_size, num_workers=4, surf_column="surf_path", train_transform=train_transform, valid_transform=valid_transform, drop_last=False)
+    train_transform = TrainTransform(scale_factor=args.scale_factor)
+    valid_transform = EvalTransform(scale_factor=args.scale_factor)
+    lotus_data = SaxiDataModule(df_train, df_val, df_val, mount_point=args.mount_point, batch_size=args.batch_size, num_workers=4, surf_column=args.surf_column, class_column=args.class_column, scalar_column=args.scalar_column, train_transform=train_transform, valid_transform=valid_transform, drop_last=False)
+    # lotus_data = SaxiDataModuleVF(df_train, df_val, df_val, mount_point=args.mount_point, batch_size=args.batch_size, num_workers=4, surf_column=args.surf_column, class_column=args.class_column, train_transform=train_transform, valid_transform=valid_transform, drop_last=False)
 
     # lotus_data.setup()
     # dl = lotus_data.train_dataloader()
@@ -51,14 +52,27 @@ def main(args):
         dirpath=args.out,
         filename='{epoch}-{val_loss:.2f}',
         save_top_k=2,
-        monitor='val_loss'
-        
+        monitor='val_loss',
+        save_last=True,
     )
 
     callbacks.append(checkpoint_callback)
 
+
+    if args.monitor:
+        checkpoint_callback_acc = ModelCheckpoint(
+            dirpath=args.out,
+            filename='{epoch}-{' + args.monitor + '}:.2f}',
+            save_top_k=2,
+            monitor=args.monitor,
+            save_last=True,
+            mode='max'
+        )
+
+        callbacks.append(checkpoint_callback_acc)
+
     
-    early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=0.00, patience=args.patience, verbose=True, mode="min")
+    early_stop_callback = EarlyStopping(monitor='val_loss', min_delta=0.00, patience=args.patience, verbose=True, mode="min")
     callbacks.append(early_stop_callback)
 
     
@@ -94,13 +108,14 @@ def main(args):
 if __name__ == '__main__':
 
 
-    parser = argparse.ArgumentParser(description='Diffusion training')
+    parser = argparse.ArgumentParser(description='Shape Analysis Explainaiblity and Interpretability train', conflict_handler='resolve')
 
     hparams_group = parser.add_argument_group('Hyperparameters')
     hparams_group.add_argument('--epochs', help='Max number of epochs', type=int, default=200)
     hparams_group.add_argument('--patience', help='Max number of patience for early stopping', type=int, default=30)
     hparams_group.add_argument('--steps', help='Max number of steps per epoch', type=int, default=-1)    
     hparams_group.add_argument('--batch_size', help='Batch size', type=int, default=2)
+    hparams_group.add_argument('--monitor', help='which other variable to monitor to save checkpoints', type=str, default=None)
 
     input_group = parser.add_argument_group('Input')
     
@@ -111,6 +126,9 @@ if __name__ == '__main__':
     input_group.add_argument('--csv_train', required=True, type=str, help='Train CSV')
     input_group.add_argument('--csv_valid', required=True, type=str, help='Valid CSV')
     input_group.add_argument('--surf_column', type=str, default='surf_path', help='Column name for the surface data')  
+    input_group.add_argument('--class_column', type=str, default=None, help='Column name for the class column')  
+    input_group.add_argument('--scalar_column', type=str, default=None, help='Column name for the scalar column')  
+    input_group.add_argument('--scale_factor', type=float, default=None, help='Use a common scale factor')      
   
     
     output_group = parser.add_argument_group('Output')

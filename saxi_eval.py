@@ -306,14 +306,38 @@ def SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
     y_pred_arr = df[args.csv_prediction_column]
     df['abs'] = np.abs(y_true_arr - y_pred_arr)
     df['error'] = y_true_arr - y_pred_arr
-    fig = px.violin(df, y="abs")
+    fig = px.violin(df, y="abs", color="class", box=True)
     abs_filename = os.path.splitext(path_to_csv)[0] + "_abs.png"
     fig.write_image(abs_filename)
 
-    fig = px.violin(df, y="error")
+    fig = px.violin(df, y="error", color="class", box=True)
     error_filename = os.path.splitext(path_to_csv)[0] + "_error.png"
     fig.write_image(error_filename)
 
+    # df["e"] = df[args.class_column] - df[args.csv_prediction_column]
+    fig = px.scatter(df, x=args.class_column, y=args.csv_prediction_column, trendline="ols")
+    scatter_filename = os.path.splitext(path_to_csv)[0] + "_scatter.png"
+    fig.write_image(scatter_filename)
+
+    # Calculate the errors
+    mae = np.mean(df['abs'])
+    mse_abs = np.mean(df['abs']**2)
+    rmse_abs = np.sqrt(mse_abs)
+    mean_error = np.mean(df['error'])
+    mse_error = np.mean(df['error']**2)
+    rmse_error = np.sqrt(mse_error)
+
+    # Create a DataFrame with the calculated errors
+    errors_df = pd.DataFrame({
+        'Metric': ['MAE', 'MSE_ABS', 'RMSE_ABS', 
+                  'ME', 'MSE', 'RMSE'],
+        'Value': [mae, mse_abs, rmse_abs, mean_error, mse_error, rmse_error]
+    })
+
+    errors_filename = os.path.splitext(path_to_csv)[0] + "_errors.csv"
+    errors_df.to_csv(errors_filename, index=False)
+
+    print(errors_df)
 
 
 def main(args):

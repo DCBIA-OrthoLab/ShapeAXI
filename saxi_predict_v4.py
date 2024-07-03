@@ -48,7 +48,6 @@ def main(args):
 
     with torch.no_grad():
         # The prediction is performed on the test data
-        probs = []
         predictions = []
         softmax = nn.Softmax(dim=1)
 
@@ -60,38 +59,14 @@ def main(args):
             
             X_mesh = model.create_mesh(V, F, CN)
             x, x_w, X = model(X_mesh)
-            x = softmax(x).detach()
-            probs.append(x)
-            predictions.append(torch.argmax(x, dim=1, keepdim=True))
-
-            # # Find the closest point in X to each point in V
-            # dists = knn_points(V, X, K=1)            
-            # # compute the key, the input shape is [BS, V_n, K, Embed_dim], it has the closest K points to the query
             
-            # V_w = knn_gather(x_w.unsqueeze(-1), dists.idx)
-            # surf_path = test_ds.getSurfPath(idx)
-            # surf = test_ds.getSurf(idx)
-
-            # explain_vw = utils.TensorToArray(V_w.squeeze())        
-            # explain_vw.SetName("mha_explainability")    
-            # surf.GetPointData().AddArray(explain_vw)
-
-            # out_path = os.path.join(args.out, surf_path)
-
-            # if not os.path.exists(os.path.dirname(out_path)):
-            #     os.makedirs(os.path.dirname(out_path))
-            
-            # utils.WriteSurf(surf, out_path)
-
-        probs = torch.cat(probs).detach().cpu().numpy()
-        predictions = torch.cat(predictions).cpu().numpy().squeeze()
+            predictions.append(x)
+        
+        predictions = torch.cat(predictions).cpu().squeeze().numpy()
 
         out_dir = os.path.join(args.out, os.path.basename(args.model))
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
-
-        out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
-        pickle.dump(probs, open(out_probs, 'wb'))
 
         df['pred'] = predictions
         if ext == ".csv":
