@@ -162,7 +162,7 @@ dependencies = [
 "Source Code" = "https://github.com/DCBIA-OrthoLab/ShapeAXI/"
 
 [tool.hatch.version]
-path = "shapeaxi/__about__.py"
+path = "src/shapeaxi/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -243,6 +243,7 @@ select = [
   "W",
   "YTT",
 ]
+
 ignore = [
   # Allow non-abstract empty methods in abstract base classes
   "B027",
