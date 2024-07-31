@@ -83,6 +83,7 @@ def Saxi_train(args, checkpoint_callback, mount_point, train, val, test, early_s
     train_transform, val_and_test_transform = list_transforms(args)
 
     if args.freesurfer != 0:
+        print("Freesurfer")
         data = SaxiFreesurferDataModule(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
     else:
         data = SaxiDataModule(df_train, df_val, df_test,mount_point = mount_point,batch_size = args.batch_size,num_workers = args.num_workers,surf_column = args.surf_column,class_column = args.class_column, train_transform = TrainTransform(scale_factor=args.scale_factor),valid_transform = EvalTransform(scale_factor=args.scale_factor),test_transform = EvalTransform(scale_factor=args.scale_factor))
@@ -132,6 +133,7 @@ def Saxi_train(args, checkpoint_callback, mount_point, train, val, test, early_s
 
 
 def main(args):
+
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.out,
         filename='{epoch}-{val_loss:.2f}',
@@ -167,7 +169,7 @@ def get_argparse():
     hparams_group.add_argument('--batch_size', help='Batch size', type=int, default=2)
 
     input_group = parser.add_argument_group('Input')
-    input_group.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA'])
+    input_group.add_argument('--nn', help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification'])
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     input_group.add_argument('--mount_point', help='Dataset mount directory', type=str, default="./")    
     input_group.add_argument('--num_workers', help='Number of workers for loading', type=int, default=4)

@@ -103,6 +103,7 @@ dependencies = [
   "nvidia-nccl-cu11==2.14.3",
   "nvidia-nvtx-cu11==11.7.91",
   "oauthlib==3.2.2",
+  "ocnn",
   "opencv-python==4.7.0.68",
   "packaging==23.0",
   "pandas==1.5.2",

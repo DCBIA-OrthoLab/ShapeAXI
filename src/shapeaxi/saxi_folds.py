@@ -383,7 +383,7 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification'])
     train_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
@@ -396,6 +396,8 @@ def cml():
     train_group.add_argument('--num_workers', type=int, help='Number of workers for loading', default=4)
     train_group.add_argument('--batch_size', type=int, help='Batch size', default=3)    
     train_group.add_argument('--patience', type=int, help='Patience for early stopping', default=30)
+    train_group.add_argument('--freesurfer', help='Use freesurfer data', type=int, default=0)
+
 
     # Arguments used for prediction
     pred_group = parser.add_argument_group('Prediction group')
@@ -412,11 +414,7 @@ def cml():
     explain_group = parser.add_argument_group('Explainability group')
     explain_group.add_argument('--target_layer', type=str, help='Target layer for explainability', default='layer4')
     explain_group.add_argument('--fps', type=int, help='Frames per second', default=24) 
-
-    #Freesurfer
-    fs_group = parser.add_argument_group('Freesurfer')
-    fs_group.add_argument('--freesurfer', help='Use freesurfer data', type=int, default=0)
-
+    
     # Arguments used for evaluation
     out_group = parser.add_argument_group('Output')
     out_group.add_argument('--out', type=str, help='Output', default="./")
