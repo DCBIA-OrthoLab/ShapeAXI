@@ -74,8 +74,9 @@ dependencies = [
   "joblib==1.2.0",
   "kaleido==0.2.1",
   "kiwisolver==1.4.4",
+  "lightning==2.3.1",
   "lightning-bolts==0.7.0",
-  "lightning-utilities==0.5.0",
+  "lightning-utilities==0.11.3.post0",
   "lit==16.0.6",
   "Mako==1.2.4",
   "Markdown==3.4.1",
@@ -102,6 +103,7 @@ dependencies = [
   "nvidia-nccl-cu11==2.14.3",
   "nvidia-nvtx-cu11==11.7.91",
   "oauthlib==3.2.2",
+  "ocnn",
   "opencv-python==4.7.0.68",
   "packaging==23.0",
   "pandas==1.5.2",
@@ -119,7 +121,6 @@ dependencies = [
   "pyquickhelper==1.12.3806",
   "pyquicksetup==0.2.4",
   "python-dateutil==2.8.2",
-  "pytorch-lightning==1.8.6",
   "pytz==2022.7",
   "PyWavelets==1.4.1",
   "PyYAML==6.0",
@@ -162,7 +163,7 @@ dependencies = [
 "Source Code" = "https://github.com/DCBIA-OrthoLab/ShapeAXI/"
 
 [tool.hatch.version]
-path = "shapeaxi/__about__.py"
+path = "src/shapeaxi/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -243,6 +244,7 @@ select = [
   "W",
   "YTT",
 ]
+
 ignore = [
   # Allow non-abstract empty methods in abstract base classes
   "B027",
