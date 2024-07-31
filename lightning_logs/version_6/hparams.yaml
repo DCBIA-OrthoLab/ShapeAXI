@@ -1,0 +1,62 @@
+base_encoder: resnet18
+base_encoder_params: pretrained=False,spatial_dims=2,n_input_channels=1,num_classes=512
+batch_size: 8
+class_column: class_2
+class_weights: !!python/object/apply:numpy.core.multiarray._reconstruct
+  args:
+  - !!python/name:numpy.ndarray ''
+  - !!python/tuple
+    - 0
+  - !!binary |
+    Yg==
+  state: !!python/tuple
+  - 1
+  - !!python/tuple
+    - 2
+  - !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - false
+  - !!binary |
+    QLLOlQck6z+ejfrORn3zPw==
+csv_test: /work/floda/data/DCBIA/DJD/Deg_classification_aggregate_long_exists_train_fold0_test.csv
+csv_train: /work/floda/data/DCBIA/DJD/Deg_classification_aggregate_long_exists_train_fold0_train_train.csv
+csv_valid: /work/floda/data/DCBIA/DJD/Deg_classification_aggregate_long_exists_train_fold0_train_test.csv
+epochs: 40
+hidden_dim: 512
+image_size: 256
+log_every_n_steps: 10
+lr: 0.0001
+mean: 0
+model: null
+monitor: null
+mount_point: /work/floda/data/DCBIA/DJD/
+neptune_project: null
+neptune_tags: null
+neptune_token: null
+nn: SaxiClassification
+num_images: 12
+num_workers: 4
+out: /work/floda/data/DCBIA/DJD/train/fold0
+out_classes: 2
+patience: 30
+radius: 1.5
+scale_factor: 1.0
+std: 0.005
+steps: -1
+subdivision_level: 2
+surf_column: surf
+tb_dir: null
+tb_name: tensorboard
+use_early_stopping: 0
