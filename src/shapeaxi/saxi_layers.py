@@ -456,7 +456,10 @@ class MHA_KNN(nn.Module):
         x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_add_(1, dists.idx.view(batch_size, -1), x_w.view(batch_size, -1))
         
         # The new predicted point is the sum of the input point and the weighted sum of the directions
-        x = x + v
+        if self.use_direction:
+            x = x + v
+        else:
+            x = v
 
         if self.return_v:
             if self.return_weights:
@@ -542,6 +545,34 @@ class SmoothAttention(nn.Module):
         x, x_s = self.attn(x, x)
 
         return x
+    
+class AttentionPooling(nn.Module):
+    def __init__(self, embed_dim=128, pooling_factor=0.5, hidden_dim=64, K=4):
+        super(AttentionPooling, self).__init__()
+        
+        self.embed_dim = embed_dim
+        self.pooling_factor = pooling_factor
+        self.attn = SelfAttention(embed_dim, hidden_dim, dim=2)
+        self.K = K
+    
+    def forward(self, x):
+
+        # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
+        dists = knn_points(x, x, K=self.K)
+        # gather the K closest points
+        
+        x = knn_gather(x, dists.idx)
+        # apply self attention, i.e., weighted average of the K closest points
+        x, x_s = self.attn(x, x)
+        x_s = x_s[:,:,0,:]
+
+        n_samples = int(x.shape[1]*self.pooling_factor)
+        idx = torch.argsort(x_s, descending=True, dim=1)[:,:n_samples]
+        
+        x = knn_gather(x, idx).squeeze(2)
+        x_s = knn_gather(x_s, idx).squeeze(2)
+        
+        return x, x_s
     
 class UnpoolMHA_KNN(nn.Module):
     def __init__(self, module: nn.Module):
