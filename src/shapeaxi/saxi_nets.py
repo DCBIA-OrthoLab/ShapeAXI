@@ -35,7 +35,7 @@ import os
 
 
 from shapeaxi import utils
-from shapeaxi.saxi_layers import IcosahedronConv2d, TimeDistributed, SelfAttention, Residual, FeedForward, MHA, UnpoolMHA, SmoothAttention, SmoothMHA, ProjectionHead, UnpoolMHA_KNN, MHA_KNN
+from shapeaxi.saxi_layers import IcosahedronConv2d, TimeDistributed, SelfAttention, Residual, FeedForward, MHA, UnpoolMHA, SmoothAttention, SmoothMHA, ProjectionHead, UnpoolMHA_KNN, MHA_KNN, Pooling_V, Attention_V, AttentionPooling, MHA_KNN_V, KNN_Embeding_V
 from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
 from shapeaxi.colors import bcolors
 from shapeaxi.saxi_losses import saxi_point_triangle_distance
@@ -3732,9 +3732,82 @@ class SaxiOctree(LightningModule):
         print(self.y_true)
         print(classification_report(self.y_true, self.y_pred, target_names=target_names))
 
+class MHAEncoder(nn.Module):
+    def __init__(self, input_dim=3, hidden_dim=64, output_dim=256, K=[9, 27, 27, 64], num_heads=[8, 16, 64, 256], stages=[16, 32, 64, 256], pooling_factor=[0.1, 0.25, 0.25, 0.5], dropout=0.1, return_sorted=True):
+        super(MHAEncoder, self).__init__()
+        
+        self.num_heads = num_heads
+        self.K = K
+        self.stages = stages
+        self.dropout = dropout
+        self.return_sorted = return_sorted
 
+        embed_dim = stages[0]
+        self.embedding = nn.Linear(input_dim, embed_dim)
 
+        for i, st in enumerate(stages):
+            setattr(self, f"mha_{i}", MHA_KNN(embed_dim=st, num_heads=num_heads[i], K=K[i], return_weights=True, dropout=dropout, return_sorted=return_sorted, use_direction=False))
+            setattr(self, f"ff_{i}", Residual(FeedForward(st, hidden_dim=hidden_dim, dropout=dropout)))
+            setattr(self, f"pool_{i}", AttentionPooling(embed_dim=st, pooling_factor=pooling_factor[i], K=K[i]))
+            st_n = stages[i+1] if i+1 < len(stages) else output_dim
+            setattr(self, f"output_{i}", nn.Linear(st, st_n))
+        
+    def forward(self, x):
+        
+        x = self.embedding(x)
+        
+        for i, _ in enumerate(self.stages):
+            # the mha will select optimal points from the input
+            x, x_w = getattr(self, f"mha_{i}")(x)
+            x = getattr(self, f"ff_{i}")(x)
+            x, x_s = getattr(self, f"pool_{i}")(x)
+            x = getattr(self, f"output_{i}")(x)
+        
+        return x
 
+class MHAEncoder_V(nn.Module):
+    def __init__(self, input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, return_sorted=True): # pooling_factor=[0.125, 0.5]
+        
+        super(MHAEncoder_V, self).__init__()
+        
+        self.num_heads = num_heads
+        self.K = K
+        self.stages = stages
+        self.dropout = dropout
+        self.return_sorted = return_sorted
+        self.sigmoid = nn.Sigmoid()
+        
+        self.embedding = KNN_Embeding_V(input_dim=input_dim, embed_dim=self.stages[0], K=self.K[0])
+
+        for i, st in enumerate(stages):
+            setattr(self, f"mha_{i}", MHA_KNN_V(embed_dim=st, num_heads=num_heads[i], K=K[i], return_weights=True, dropout=dropout, return_sorted=return_sorted, use_direction=False))
+            # setattr(self, f"ff_{i}", Residual(FeedForward(st, hidden_dim=hidden_dim, dropout=dropout)))
+            # setattr(self, f"attn_{i}", Attention_V(embed_dim=st, hidden_dim=hidden_dim))
+            # setattr(self, f"pool_{i}", Pooling_V(pooling_factor=pooling_factor[i]))
+            st_n = stages[i+1] if i+1 < len(stages) else output_dim
+            setattr(self, f"output_{i}", nn.Linear(st, st_n))
+        
+    def forward(self, x, x_v):
+        
+        x = self.embedding(x, x_v)
+        
+        x_vs = []
+        
+        for i, _ in enumerate(self.stages):
+            # the mha will select optimal points from the input
+            x, x_v, x_w = getattr(self, f"mha_{i}")(x, x_v)
+            # x_vw.append((x_v, x_w))
+            # x = getattr(self, f"ff_{i}")(x)
+            # x_s = getattr(self, f"attn_{i}")(x)
+            # x_vs.append((x_v, x_s))
+            # x, x_v, x_s = getattr(self, f"pool_{i}")(x, x_v, x_s)
+            x = getattr(self, f"output_{i}")(x)
+
+        x = self.sigmoid(x)
+        x_vs.append((x_v, x))
+        # x_vs.append((x_v, x_s))
+
+        return x, x_vs
 ############################################################################################################################################################################
 
 
