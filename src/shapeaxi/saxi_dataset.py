@@ -34,6 +34,8 @@ import monai
 from monai.data import DataLoader as monai_DataLoader
 from shapeaxi import utils
 import shapeaxi.saxi_transforms as saxi_transforms
+import argparse
+from collections.abc import Callable
 
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #
@@ -92,6 +94,7 @@ class SaxiDataset(Dataset):
             
         if self.scalar_column:
             scalar = torch.tensor(self.df.iloc[idx][self.scalar_column], dtype=torch.float32)
+            
             if self.CN:
                 return verts, faces, color_normals, scalar
             else:
@@ -110,31 +113,58 @@ class SaxiDataset(Dataset):
 
 class SaxiDataModule(LightningDataModule):
     #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
-    def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column=None , surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
+    def __init__(self, *args, **kwargs):
         super().__init__()
-        self.df_train = df_train
-        self.df_val = df_val   
-        self.df_test = df_test     
-        self.mount_point = mount_point
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.surf_column = surf_column
-        self.class_column = class_column
-        self.scalar_column = scalar_column
-        self.surf_property = surf_property        
-        self.train_transform = train_transform
-        self.valid_transform = valid_transform
-        self.test_transform = test_transform
-        self.drop_last = drop_last
+        self.save_hyperparameters()
+
+        self.df_train = pd.read_csv(self.hparams.csv_train)
+        self.df_val = pd.read_csv(self.hparams.csv_valid)
+        self.df_test = pd.read_csv(self.hparams.csv_test)
+        self.mount_point = self.hparams.mount_point
+        self.batch_size = self.hparams.batch_size
+        self.num_workers = self.hparams.num_workers
+        self.color_normals = self.hparams.color_normals
+        self.surf_column = self.hparams.surf_column
+        self.class_column = self.hparams.class_column
+        self.scalar_column = self.hparams.scalar_column
+        self.surf_property = self.hparams.surf_property        
+        self.train_transform = self.hparams.train_transform
+        self.valid_transform = self.hparams.valid_transform
+        self.test_transform = self.hparams.test_transform
+        self.drop_last = self.hparams.drop_last
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("SaxiDataModule")
+        
+        group.add_argument('--batch_size', type=int, default=16)
+        group.add_argument('--num_workers', type=int, default=6)
+        group.add_argument('--surf_column', type=str, default=None)
+        group.add_argument('--class_column', type=str, default=None)
+        group.add_argument('--scalar_column', type=str, default=None)
+        group.add_argument('--color_normals', type=int, default=1)
+        group.add_argument('--csv_train', type=str, default=None)
+        group.add_argument('--csv_valid', type=str, default=None)
+        group.add_argument('--csv_test', type=str, default=None)
+        group.add_argument('--mount_point', type=str, default="./")
+        group.add_argument('--train_transform', type=Callable, default=None)
+        group.add_argument('--valid_transform', type=Callable, default=None)
+        group.add_argument('--test_transform', type=Callable, default=None)
+        group.add_argument('--drop_last', type=bool, default=False)
+        group.add_argument('--surf_property', type=str, default=None)
+
+        return parent_parser
 
     def setup(self, stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_ds = SaxiDataset(self.df_train, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.train_transform)
-        self.val_ds = SaxiDataset(self.df_val, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.valid_transform)
-        self.test_ds = SaxiDataset(self.df_test, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.test_transform)
+        self.train_ds = SaxiDataset(self.df_train, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, CN=self.color_normals, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.train_transform)
+        self.val_ds = SaxiDataset(self.df_val, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, CN=self.color_normals, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.valid_transform)
+        self.test_ds = SaxiDataset(self.df_test, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, CN=self.color_normals, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.test_transform)
 
     def pad_verts_faces(self, batch):
         # Collate function for the dataloader to know how to comine the data
+
         if self.class_column or self.scalar_column:
             verts = [v for v, f, cn, l in batch]
             faces = [f for v, f, cn, l in batch]        
@@ -155,7 +185,7 @@ class SaxiDataModule(LightningDataModule):
             
             verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
             faces = pad_sequence(faces, batch_first=True, padding_value=-1)        
-            color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)            
+            color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)
             
             return verts, faces, color_normals
     
@@ -788,211 +818,143 @@ import ocnn
 from ocnn.octree import Octree, Points
 
 class SaxiOctreeDataset(Dataset):
-    def __init__(self,df,transform=None, version=None, name_class ='fsqc_qc', freesurfer_path=None, normalize=False):
+    def __init__(self, df, transform=None, mount_point="./", surf_column = None, class_column = None, scalar_column = None, depth = 8, use_normals=False, surf_property=None):
         self.df = df
         self.transform = transform
-        self.version = version
-        self.name_class = name_class
-        self.freesurfer_path = freesurfer_path
-        self.normalize = normalize
+        self.surf_column = surf_column
+        self.class_column = class_column
+        self.scalar_column = scalar_column
+        self.depth = depth
+        self.use_normals = use_normals
+        self.surf_property = surf_property
+        self.mount_point = mount_point
 
     def __len__(self):
         return len(self.df.index)
 
     def __getitem__(self, idx):
-        # Get item for each hemisphere (left and right)
-        vertsL, vertex_featuresL, Y = self.getitem_per_hemisphere('L', idx)
-        vertsR, vertex_featuresR, Y = self.getitem_per_hemisphere('R', idx)
 
-        # vertsL, vertex_featuresL = self.match_sizes(vertsL, vertex_featuresL)
-        # vertsR, vertex_featuresR = self.match_sizes(vertsR, vertex_featuresR)
+        surf = self.getSurf(idx)
 
-        # print(f'VertsL: {vertsL.size()}', f'Vertex FeaturesL: {vertex_featuresL.size()}')
-        # print(f'VertsR: {vertsR.size()}', f'Vertex FeaturesR: {vertex_featuresR.size()}')
+        if self.transform:
+            surf = self.transform(surf)
+
+        verts, faces = utils.PolyDataToTensors_v_f(surf)
+
+        normals = None
+        if self.use_normals:
+            normals = utils.GetNormalsTensor(surf)
         
-        # Create Octree for each hemisphere
-        octree_L = Octree(8)
-        octree_L.build_octree(Points(vertsL, features=vertex_featuresL))
-        # octree_L.build_octree(Points(vertsL))
-        octree_R = Octree(8)
-        octree_R.build_octree(Points(vertsR, features=vertex_featuresR))
-        # octree_R.build_octree(Points(vertsR))
+        verts_features = None
 
-        # Return separate Octrees for left and right hemispheres
-        return octree_L, octree_R, Y
-    
+        if self.surf_property:            
+            
+            surf_point_data = surf.GetPointData().GetScalars(self.surf_property)
+            surf_point_data = torch.tensor(vtk_to_numpy(surf_point_data)).to(torch.float32)
 
-    def match_sizes(self, verts, vertex_features):
-        num_verts = verts.size(0)
-        num_features = vertex_features.size(0)
+            verts_features = surf_point_data
+
+        octree = Octree(self.depth)
         
-        if num_verts > num_features:
-            # Truncate verts
-            verts = verts[:num_features, :]
-        elif num_features > num_verts:
-            # Truncate vertex_features
-            vertex_features = vertex_features[:num_verts, :]
+        points = Points(verts, normals=normals, features=verts_features)
+        octree.build_octree(points)
         
-        return verts, vertex_features
+        if self.class_column:
+            cl = torch.tensor(self.df.iloc[idx][self.class_column], dtype=torch.int64)
+            return octree, cl
 
-    
-    def data_to_tensor(self,path):
-        data = nib.freesurfer.read_morph_data(path)
-        data = data.byteswap().newbyteorder()
-        data = torch.from_numpy(data).float()
-        return data
-    
-
-    # Get the verts, faces, vertex_features, face_features and Y from an hemisphere
-    def getitem_per_hemisphere(self, hemisphere, idx):
-        row = self.df.loc[idx]
-        # sub_session = '_' + row['eventname']
-        sub_session = '_ses-' + row['eventname'].replace('_', '').replace('year', 'Year').replace('arm', 'Arm').replace('followup', 'FollowUp').replace('yArm','YArm')
-        path_to_fs_data = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf')
-
-        # Load Data
-        hemisphere_prefix = 'lh' if hemisphere == 'L' else 'rh'
-        path_sa = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.area')
-        path_thickness = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.thickness')
-        path_curvature = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.curv')
-        path_sulc = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.sulc')
-
-        paths = [path_sa, path_thickness, path_curvature, path_sulc]
-        l_features = [self.data_to_tensor(path).unsqueeze(dim=1) for path in paths]
-
-        vertex_features = torch.cat(l_features, dim=1)
-
-        wm_vtk_path = os.path.join(path_to_fs_data, f'{hemisphere_prefix}.white.vtk')
-        surf = utils.ReadSurf(wm_vtk_path)
-
-        transform = saxi_transforms.UnitSurfTransform()
-        surf_norm = transform(surf)
-
-        verts, faces = utils.PolyDataToTensors_v_f(surf_norm)
-
-        if self.normalize:
-            mean, std = self.normalize_feature(self.df, hemisphere)
-            vertex_features = (vertex_features - mean) / std
-
-        Y = torch.tensor([int(row[self.name_class])])
-
-        #Transformations
-        if self.transform:        
-            verts = self.transform(verts)
-
-        if verts.size(0) != vertex_features.size(0):
-            print(f'Verts: {verts.size(0)}', f'Vertex Features: {vertex_features.size(0)}')
-            print(path_to_fs_data)
-
-        return verts, vertex_features, Y
-    
-
-    def normalize_feature(self, df, hemisphere):
-        # Initialize lists to store mean and std
-        means = []
-        stds = []
-
-        # List of features to be standardized for each hemisphere
-        mean_values = {
-            'L': ['sulc_left_mean', 'curvature_left_mean', 'thickness_left_mean', 'area_left_mean'],
-            'R': ['sulc_right_mean', 'curvature_right_mean', 'thickness_right_mean', 'area_right_mean']
-        }
-
-        std_values = {
-            'L': ['sulc_left_std', 'curvature_left_std', 'thickness_left_std', 'area_left_std'],
-            'R': ['sulc_right_std', 'curvature_right_std', 'thickness_right_std', 'area_right_std']
-        }
-
-        for mean in mean_values[hemisphere]:
-            means.append(df[mean].mean())
+            
+        if self.scalar_column:
+            sl = torch.tensor(self.df.iloc[idx][self.scalar_column], dtype=torch.float32)
+            return octree, sl
         
-        for std in std_values[hemisphere]:
-            stds.append(df[std].mean())
-
-        # Convert lists to tensors
-        mean_tensor = torch.tensor(means)
-        std_tensor = torch.tensor(stds)
-        
-        return mean_tensor, std_tensor
+        return octree
     
-
+    
     def getSurf(self, idx):
         row = self.df.loc[idx]
-        sub_session = '_' + row['eventname']
-        lh_inflated_path = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'lh_inflated.vtk')
-        rh_inflated_path = os.path.join(self.freesurfer_path, row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'rh_inflated.vtk')
-
-        if not lh_inflated_path or not rh_inflated_path:
-            raise ValueError(f'File {lh_inflated_path} or/and {rh_inflated_path} does not exist')
-        else:
-            return utils.ReadSurf(lh_inflated_path), utils.ReadSurf(rh_inflated_path), os.path.join(row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'lh_inflated.vtk'), os.path.join(row['Subject_ID'], row['Subject_ID'] + sub_session, 'surf', 'rh_inflated.vtk')
+        
+        surf_fn = os.path.join(self.mount_point, row[self.surf_column])
+        
+        return utils.ReadSurf(surf_fn)
 
 
 class SaxiOctreeDataModule(LightningDataModule):
-    def __init__(self,batch_size,data_train,data_val,data_test,train_transform=None,val_and_test_transform=None, num_workers=6,name_class='fsqc_qc',freesurfer_path=None):
+    def __init__(self, *args, **kwargs):
         super().__init__()
-        self.batch_size = batch_size 
-        self.data_train = data_train
-        self.data_val = data_val
-        self.data_test = data_test
-        self.train_transform = train_transform
-        self.val_and_test_transform = val_and_test_transform
-        self.num_workers = num_workers
-        self.name_class = name_class
-        self.freesurfer_path = freesurfer_path
+        self.save_hyperparameters(logger=False)
+
+        self.df_train = pd.read_csv(self.hparams.csv_train)
+        self.df_val = pd.read_csv(self.hparams.csv_valid)
+        self.df_test = pd.read_csv(self.hparams.csv_test)
+
+        self.batch_size = self.hparams.batch_size 
+        
+        self.train_transform = self.hparams.train_transform
+        self.valid_transform = self.hparams.valid_transform
+        self.test_transform = self.hparams.test_transform
+        
+        self.num_workers = self.hparams.num_workers
+        self.surf_column = self.hparams.surf_column
+        self.class_column = self.hparams.class_column
+        self.scalar_column = self.hparams.scalar_column
+        self.use_normals = self.hparams.use_normals
+        self.surf_property = self.hparams.surf_property
+
+        self.depth = self.hparams.depth
 
         self.weights = []
-        self.df_train = pd.read_csv(self.data_train)
-        self.df_val = pd.read_csv(self.data_val)
-        self.df_test = pd.read_csv(self.data_test)
-        self.weights = self.class_weights()
 
-    def class_weights(self):
-        class_weights_train = self.compute_class_weights(self.data_train)
-        class_weights_val = self.compute_class_weights(self.data_val)
-        class_weights_test = self.compute_class_weights(self.data_test)
-        return [class_weights_train, class_weights_val, class_weights_test]
+    @staticmethod
+    def add_data_specific_args(parent_parser):
 
-    def compute_class_weights(self, data_file):
-        df = pd.read_csv(data_file)
-        y = np.array(df.loc[:, self.name_class])
-        labels = np.unique(y)
-        class_weights = torch.tensor(class_weight.compute_class_weight('balanced', classes=labels, y=y)).to(torch.float32)
-        return class_weights
+        group = parent_parser.add_argument_group("SaxiOctreeDataModule")
+        
+        group.add_argument('--batch_size', type=int, default=16)
+        group.add_argument('--num_workers', type=int, default=6)
+        group.add_argument('--surf_column', type=str, default=None)
+        group.add_argument('--class_column', type=str, default=None)
+        group.add_argument('--scalar_column', type=str, default=None)
+        group.add_argument('--csv_train', type=str, default=None)
+        group.add_argument('--csv_valid', type=str, default=None)
+        group.add_argument('--csv_test', type=str, default=None)
+        group.add_argument('--mount_point', type=str, default="./")
+        group.add_argument('--train_transform', type=Callable, default=None)
+        group.add_argument('--valid_transform', type=Callable, default=None)
+        group.add_argument('--test_transform', type=Callable, default=None)
+        group.add_argument('--use_normals', type=int, default=0)
+        group.add_argument('--surf_property', type=str, default=None)
+
+        return parent_parser
+        
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = SaxiOctreeDataset(self.df_train,self.train_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path, normalize=True)
-        self.val_dataset = SaxiOctreeDataset(self.df_val,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
-        self.test_dataset = SaxiOctreeDataset(self.df_test,self.val_and_test_transform,name_class = self.name_class,freesurfer_path = self.freesurfer_path)
+        self.train_dataset = SaxiOctreeDataset(df=self.df_train, transform = self.train_transform, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
+        self.val_dataset = SaxiOctreeDataset(df=self.df_val, transform = self.valid_transform, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
+        self.test_dataset = SaxiOctreeDataset(df=self.df_test, transform = self.test_transform, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
 
-    def padding(self, batch):
+    def collate_fn(self, batch):
+
+        if self.class_column or self.scalar_column:
+
         
-        octree_L_batch = [item[0] for item in batch]
-        octree_R_batch = [item[1] for item in batch]
-        Y_batch = [item[2] for item in batch]
+            octree = [item[0] for item in batch]
+            Y = [item[1] for item in batch]
 
-        # Merge octrees if needed
-        merged_octree_L = ocnn.octree.merge_octrees(octree_L_batch)
-        merged_octree_R = ocnn.octree.merge_octrees(octree_R_batch)
+            octree = ocnn.octree.merge_octrees(octree)
 
-        # Construct neighbor indices
-        merged_octree_L.construct_all_neigh()
-        merged_octree_R.construct_all_neigh()
+            return octree, torch.stack(Y)
+        else:
+            octree = ocnn.octree.merge_octrees(batch)
 
-        # Convert labels to Tensor
-        Y_tensor = torch.tensor(Y_batch)
-
-        return merged_octree_L, merged_octree_R, Y_tensor
+            return octree
 
     def train_dataloader(self):  
-        return monai_DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, drop_last=True, collate_fn=self.padding)
+        return monai_DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, drop_last=True, collate_fn=self.collate_fn)
 
     def val_dataloader(self):
-        return monai_DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, drop_last=True, collate_fn=self.padding)        
+        return monai_DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, drop_last=True, collate_fn=self.collate_fn)        
 
     def test_dataloader(self):
-        return monai_DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, drop_last=True, collate_fn=self.padding)
-
-    def get_weigths(self):
-        return self.weights
+        return monai_DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, drop_last=True, collate_fn=self.collate_fn)

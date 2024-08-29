@@ -99,7 +99,6 @@ class TrainTransform:
         self.train_transform = transforms.Compose(
             [
                 UnitSurfTransform(scale_factor=scale_factor),
-                TriangleFilter(),
                 RandomRotation()
             ]
         )
@@ -113,8 +112,7 @@ class EvalTransform:
     def __init__(self, scale_factor=None):
         self.eval_transform = transforms.Compose(
             [
-                UnitSurfTransform(scale_factor=scale_factor),
-                TriangleFilter()
+                UnitSurfTransform(scale_factor=scale_factor)
             ]
         )
 

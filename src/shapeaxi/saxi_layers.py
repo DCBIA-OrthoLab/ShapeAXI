@@ -512,7 +512,7 @@ class MHA_KNN_V(nn.Module):
         dists = knn_points(x_v, x_v, K=self.K, return_sorted=self.return_sorted)            
         # compute the key, the input shape is [BS, V_n, K, Embed_dim], it has the closest K points to the query. i.e, find the closest K points to each point in the point cloud
         k = knn_gather(x, dists.idx)
-        # k_v = knn_gather(x_v, dists.idx)
+        k_v = knn_gather(x_v, dists.idx)
         
         #the value tensor contains the directions towards the closest points. 
         # the intuition here is that based on the query and key embeddings, the model will learn to predict
@@ -539,8 +539,8 @@ class MHA_KNN_V(nn.Module):
         # Based on the weights of the attention layer, we compute the new position of the points
         # Shape of x_w is [BS, V_n, K] and k_v (x_v after knn_gather) is [BS, V_n, K, 3]
         
-        # x_v = k_v * x_w.unsqueeze(-1)
-        # x_v = x_v.sum(dim=-2)
+        x_v = k_v * x_w.unsqueeze(-1)
+        x_v = x_v.sum(dim=-2)
 
         # x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_add_(1, dists.idx.view(batch_size, -1), x_w.view(batch_size, -1))
         x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_reduce_(dim=1, index=dists.idx.view(batch_size, -1), src=x_w.view(batch_size, -1), reduce="mean")

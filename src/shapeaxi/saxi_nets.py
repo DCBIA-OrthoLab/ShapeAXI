@@ -3263,6 +3263,7 @@ class SaxiMHAFBRegression(LightningModule):
         if CN is not None:
             textures = TexturesVertex(verts_features=CN.to(torch.float32))
             return Meshes(verts=V, faces=F, textures=textures)
+        
         return Meshes(verts=V, faces=F)
     
     def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
@@ -3639,55 +3640,63 @@ class SaxiOctree(LightningModule):
         self.y_pred = []
         self.y_true = []
 
-        # Left network
-        self.create_network('L')
-        # Right network
-        self.create_network('R')
+        
+        self.features = self.create_network()
+        self.drop = nn.Dropout(p=self.hparams.dropout)
+        self.Classification = nn.Linear(self.hparams.out_channels, self.hparams.out_classes)
+
 
         # Loss
         self.loss_train = nn.CrossEntropyLoss()
         self.loss_val = nn.CrossEntropyLoss()
         self.loss_test = nn.CrossEntropyLoss()
 
-        # Dropout
-        self.drop = nn.Dropout(p=self.hparams.dropout_lvl)
-
-        # Final layer
-        self.Classification = nn.Linear(2560, self.hparams.out_classes)
-
         #vAccuracy
         self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
         self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
 
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiOctree")
+        
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument("--out_classes", type=int, default=2)
 
-    def create_network(self, side):
-        self.resnet = ocnn.models.ResNet(in_channels=7, out_channels=1280, resblock_num=1, stages=3, nempty=False)
+        # Octree params
+        group.add_argument("--in_channels", type=int, default=3)
+        group.add_argument("--dropout", type=float, default=0.1)
+        group.add_argument("--out_channels", type=int, default=1280)
+        group.add_argument('--input_feature', type=str, help='Type of features to get from the octree', default='P')
+        group.add_argument('--resblock_num', type=int, help='Number of residual blocks', default=1)
+        group.add_argument('--stages', type=int, help='Number of stages', default=3)
+        group.add_argument('--depth', type=int, help='Start depth', default=16)
+        group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.5)
+        group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=2)
+        group.add_argument('--image_size', type=int, help='Image resolution size', default=256)
+
+        return parent_parser
+    
+    def create_network(self):
+        import ocnn
+        return ocnn.models.ResNet(in_channels=self.hparams.in_channels, out_channels=self.hparams.out_channels, resblock_num=self.hparams.resblock_num, stages=self.hparams.stages, nempty=False)
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
         return optimizer
 
-    def forward(self, x):
-        OL, OR, Y = x
+    def forward(self, O):
+
         # TimeDistributed
-        xL = self.get_features(OL,'L')
-        xR = self.get_features(OR,'R')
-        l_left_right = [xL,xR]
-        x = torch.cat(l_left_right,dim=1)
-        # Last classification layer
-        x = self.drop(x)
-        x = self.Classification(x)
+        X = O.get_input_feature(self.hparams.input_feature).to(torch.float)
+        z = self.features(X, octree=O, depth=self.hparams.depth)
+        x = self.Classification(z)
 
-        return x
-
-    def get_features(self,octree,side):
-        x = self.resnet(octree.get_input_feature('FP').to(torch.float), octree=octree, depth=8)
         return x
 
     def training_step(self, train_batch, batch_idx):
-        OL, OR, Y = train_batch
-        x = self((OL, OR, Y))
-        loss = self.loss_train(x,Y)
+        O, Y = train_batch
+        x = self(O)
+        loss = self.loss_train(x, Y)
         self.log('train_loss', loss) 
         predictions = torch.argmax(x, dim=1, keepdim=True)
         self.train_accuracy(predictions, Y.reshape(-1, 1))
@@ -3696,9 +3705,9 @@ class SaxiOctree(LightningModule):
         return loss
 
     def validation_step(self,val_batch,batch_idx):
-        OL, OR, Y = val_batch
-        x = self((OL, OR, Y))
-        loss = self.loss_val(x,Y)
+        O, Y = val_batch
+        x = self(O)
+        loss = self.loss_val(x, Y)
         self.log('val_loss', loss)
         predictions = torch.argmax(x, dim=1, keepdim=True)
         val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
