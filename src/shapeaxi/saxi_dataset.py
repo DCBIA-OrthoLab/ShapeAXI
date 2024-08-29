@@ -115,7 +115,7 @@ class SaxiDataModule(LightningDataModule):
     #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
     def __init__(self, *args, **kwargs):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(logger=False)
 
         self.df_train = pd.read_csv(self.hparams.csv_train)
         self.df_val = pd.read_csv(self.hparams.csv_valid)
