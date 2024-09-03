@@ -875,8 +875,11 @@ class SaxiOctreeDataset(Dataset):
         row = self.df.loc[idx]
         
         surf_fn = os.path.join(self.mount_point, row[self.surf_column])
+        surf = utils.ReadSurf(surf_fn)
+        if surf.GetNumberOfPoints() == 0:
+            raise ValueError(f'File {surf_fn} does not have any points')
         
-        return utils.ReadSurf(surf_fn)
+        return surf
 
 
 class SaxiOctreeDataModule(LightningDataModule):
@@ -887,6 +890,8 @@ class SaxiOctreeDataModule(LightningDataModule):
         self.df_train = pd.read_csv(self.hparams.csv_train)
         self.df_val = pd.read_csv(self.hparams.csv_valid)
         self.df_test = pd.read_csv(self.hparams.csv_test)
+
+        self.mount_point = self.hparams.mount_point
 
         self.batch_size = self.hparams.batch_size 
         
@@ -930,9 +935,9 @@ class SaxiOctreeDataModule(LightningDataModule):
 
     def setup(self,stage=None):
         # Assign train/val datasets for use in dataloaders
-        self.train_dataset = SaxiOctreeDataset(df=self.df_train, transform = self.train_transform, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
-        self.val_dataset = SaxiOctreeDataset(df=self.df_val, transform = self.valid_transform, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
-        self.test_dataset = SaxiOctreeDataset(df=self.df_test, transform = self.test_transform, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
+        self.train_dataset = SaxiOctreeDataset(df=self.df_train, transform = self.train_transform, mount_point=self.mount_point, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
+        self.val_dataset = SaxiOctreeDataset(df=self.df_val, transform = self.valid_transform, mount_point=self.mount_point, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
+        self.test_dataset = SaxiOctreeDataset(df=self.df_test, transform = self.test_transform, mount_point=self.mount_point, surf_column=self.surf_column, class_column=self.class_column, scalar_column=self.scalar_column, depth=self.depth, use_normals=self.use_normals, surf_property=self.surf_property)
 
     def collate_fn(self, batch):
 
@@ -943,10 +948,12 @@ class SaxiOctreeDataModule(LightningDataModule):
             Y = [item[1] for item in batch]
 
             octree = ocnn.octree.merge_octrees(octree)
+            octree.construct_all_neigh()
 
             return octree, torch.stack(Y)
         else:
             octree = ocnn.octree.merge_octrees(batch)
+            octree.construct_all_neigh()
 
             return octree
 
