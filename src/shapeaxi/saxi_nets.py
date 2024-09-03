@@ -3688,6 +3688,7 @@ class SaxiOctree(LightningModule):
 
         # TimeDistributed
         X = O.get_input_feature(self.hparams.input_feature).to(torch.float)
+
         z = self.features(X, octree=O, depth=self.hparams.depth)
         x = self.Classification(z)
 
@@ -3708,12 +3709,10 @@ class SaxiOctree(LightningModule):
         O, Y = val_batch
         x = self(O)
         loss = self.loss_val(x, Y)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, sync_dist=True)
         predictions = torch.argmax(x, dim=1, keepdim=True)
         val_acc = self.val_accuracy(predictions, Y.reshape(-1, 1))
-        self.log("val_acc", val_acc, batch_size=self.hparams.batch_size)
-
-        return val_acc
+        self.log("val_acc", val_acc, batch_size=self.hparams.batch_size, sync_dist=True)
 
 
     def test_step(self,test_batch,batch_idx):
