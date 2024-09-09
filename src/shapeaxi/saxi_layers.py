@@ -561,9 +561,9 @@ class MHA_KNN_V(nn.Module):
             return x, x_v, x_w
         return x, x_v
     
-class KNN_Embeding_V(nn.Module):
+class KNN_Embedding_V(nn.Module):
     def __init__(self, input_dim, embed_dim, K=27, return_sorted=True):
-        super(KNN_Embeding_V, self).__init__()
+        super(KNN_Embedding_V, self).__init__()
         self.input_dim = input_dim
         self.K = K
         self.return_sorted = return_sorted
@@ -723,28 +723,60 @@ class AttentionPooling_V(nn.Module):
         
         self.embed_dim = embed_dim
         self.pooling_factor = pooling_factor
-        self.attn = SelfAttention(embed_dim, hidden_dim, dim=2)
         self.K = K
+        
+        self.W1 = nn.Linear(embed_dim, hidden_dim)
+        self.V = nn.Linear(hidden_dim, 1)
+        self.Tanh = nn.Tanh()
+        self.Sigmoid = nn.Sigmoid()        
     
     def forward(self, x, x_v):
 
         # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
+
+        x_s = self.Sigmoid(self.V(self.Tanh(self.W1(x))))
+
+        
         x_sample, x_idx = sample_points(x_v, int(x_v.shape[1]*self.pooling_factor))
         dists = knn_points(x_sample, x_v, K=self.K)
-        # gather the K closest points
         
         x = knn_gather(x, dists.idx)
-        # apply self attention, i.e., weighted average of the K closest points
-        x, x_s = self.attn(x, x)        
-
-        x_v = knn_gather(x_v, dists.idx)
-        attention_weights = x_s/torch.sum(x_s, dim=2, keepdim=True)
-        x_v = attention_weights * x_v
-        x_v = torch.sum(x_v, dim=2)
-
-        x_s = x_s[:, :, 0, :]
+        score = knn_gather(x_s, dists.idx)
         
-        return x, x_v, x_s
+        attention_weights = score/torch.sum(score, dim=2, keepdim=True)
+
+        x = attention_weights * x
+        x = torch.sum(x, dim=2)
+
+        x_v = x_sample
+        
+        return x, x_v, x_s, x_idx
+    
+class AttentionPooling_Idx(nn.Module):
+    def __init__(self, embed_dim=128, hidden_dim=64):
+        super(AttentionPooling_Idx, self).__init__()
+        
+        self.embed_dim = embed_dim
+        
+        self.W1 = nn.Linear(embed_dim, hidden_dim)
+        self.V = nn.Linear(hidden_dim, 1)
+        self.Tanh = nn.Tanh()
+        self.Sigmoid = nn.Sigmoid()
+    
+    def forward(self, x, idx):
+        # apply self attention, i.e., weighted average of the K closest points
+
+        x_s = self.Sigmoid(self.V(self.Tanh(self.W1(x))))
+
+        x = knn_gather(x, idx)
+        score = knn_gather(x_s, idx)
+
+        attention_weights = score/torch.sum(score, dim=2, keepdim=True)
+        
+        x = attention_weights * x
+        x = torch.sum(x, dim=2)
+        
+        return x, x_s
     
 class UnpoolMHA_KNN(nn.Module):
     def __init__(self, module: nn.Module):
@@ -796,5 +828,53 @@ class SmoothMHA(nn.Module):
         attention_weights = x_s/torch.sum(x_s, dim=self.dim, keepdim=True)
         x = attention_weights * x
         x = torch.sum(x, dim=self.dim)
+
+        return x
+    
+class MHA_Idx(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, use_direction=True):
+        super(MHA_Idx, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
+        self.use_direction = use_direction
+    
+    def forward(self, x, idx):
+
+        batch_size, V_n, Embed_dim = x.shape
+        K = idx.shape[-1]
+        
+        k = knn_gather(x, idx)
+        
+        #the value tensor contains the directions towards the closest points. 
+        # the intuition here is that based on the query and key embeddings, the model will learn to predict
+        # the best direction to move the new embedding, i.e., create a new point in the point cloud
+        # the shape of v is [BS, V_n, K, Embed_dim]
+
+        # the query is the input point itself, the shape of q is [BS, V_n, 1, Embed_dim]
+        q = x.unsqueeze(-2)
+
+        if self.use_direction:
+            v = k - q
+        else:
+            v = k
+
+        q = q.contiguous().view(batch_size * V_n, 1, Embed_dim) # Original point with dimension 1 added
+        k = k.contiguous().view(batch_size * V_n, K, Embed_dim)
+        v = v.contiguous().view(batch_size * V_n, K, Embed_dim)        
+
+        v, x_w = self.attention(q, k, v)
+
+        v = v.contiguous().view(batch_size, V_n, Embed_dim)
+        # x_w = x_w.contiguous().view(batch_size, V_n, K)
+        
+        # Based on the weights of the attention layer, we compute the new position of the points
+        # Shape of x_w is [BS, V_n, K] and k_v (x_v after knn_gather) is [BS, V_n, K, 3]
+        
+        # The new predicted point is the sum of the input point and the weighted sum of the directions
+        if self.use_direction:
+            x = x + v
+        else:
+            x = v
 
         return x
