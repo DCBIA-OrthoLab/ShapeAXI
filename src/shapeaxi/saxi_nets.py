@@ -104,9 +104,9 @@ class AttentionRings(nn.Module):
 
 
 
-class SaxiMHAEncoder(nn.Module):
+class MHAEncoder(nn.Module):
     def __init__(self, input_dim=3, embed_dim=256, hidden_dim=64, num_heads=256, K=32, output_dim=256, sample_levels=[40962, 10242, 2562, 642, 162], dropout=0.1, return_sorted=True):
-        super(SaxiMHAEncoder, self).__init__()
+        super(MHAEncoder, self).__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.K = K
@@ -178,9 +178,9 @@ class SaxiMHAEncoder(nn.Module):
         return x, weights
     
 
-class SaxiMHADecoder(nn.Module):
+class MHADecoder(nn.Module):
     def __init__(self, input_dim=3, embed_dim=128, output_dim=3, num_heads=4, sample_levels=1, K=4, dropout=0.1, return_sorted=True):
-        super(SaxiMHADecoder, self).__init__()
+        super(MHADecoder, self).__init__()
 
         self.input_dim = input_dim        
         self.K = K
@@ -228,39 +228,6 @@ class SaxiMHADecoder(nn.Module):
         
         x = self.output(x)
 
-        return x
-
-class MHAEncoder(nn.Module):
-    def __init__(self, input_dim=3, hidden_dim=64, output_dim=256, K=[9, 27, 27, 64], num_heads=[8, 16, 64, 256], stages=[16, 32, 64, 256], pooling_factor=[0.1, 0.25, 0.25, 0.5], dropout=0.1, return_sorted=True):
-        super(MHAEncoder, self).__init__()
-        
-        self.num_heads = num_heads
-        self.K = K
-        self.stages = stages
-        self.dropout = dropout
-        self.return_sorted = return_sorted
-
-        embed_dim = stages[0]
-        self.embedding = nn.Linear(input_dim, embed_dim)
-
-        for i, st in enumerate(stages):
-            setattr(self, f"mha_{i}", MHA_KNN(embed_dim=st, num_heads=num_heads[i], K=K[i], return_weights=True, dropout=dropout, return_sorted=return_sorted, use_direction=False))
-            setattr(self, f"ff_{i}", Residual(FeedForward(st, hidden_dim=hidden_dim, dropout=dropout)))
-            setattr(self, f"pool_{i}", AttentionPooling(embed_dim=st, pooling_factor=pooling_factor[i], K=K[i]))
-            st_n = stages[i+1] if i+1 < len(stages) else output_dim
-            setattr(self, f"output_{i}", nn.Linear(st, st_n))
-        
-    def forward(self, x):
-        
-        x = self.embedding(x)
-        
-        for i, _ in enumerate(self.stages):
-            # the mha will select optimal points from the input
-            x, x_w = getattr(self, f"mha_{i}")(x)
-            x = getattr(self, f"ff_{i}")(x)
-            x, x_s = getattr(self, f"pool_{i}")(x)
-            x = getattr(self, f"output_{i}")(x)
-        
         return x
 
 class MHAEncoder_V(nn.Module):

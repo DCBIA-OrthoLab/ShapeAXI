@@ -21,8 +21,8 @@ from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.loggers import NeptuneLogger
 
 from shapeaxi import saxi_dataset 
-from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, RandomRemoveTeethTransform, UnitSurfTransform, RandomRotationTransform,ApplyRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
-from shapeaxi import saxi_nets
+from shapeaxi.saxi_transforms import *
+from shapeaxi import saxi_nets_lightning
 from shapeaxi import saxi_logger
 
 
@@ -123,7 +123,7 @@ def Saxi_train(args, callbacks):
     #     elif args.ico_lvl == 2:
     #         args.radius = 1
     
-    SAXINETS = getattr(saxi_nets, args.nn)
+    SAXINETS = getattr(saxi_nets_lightning, args.nn)
     model = SAXINETS(**args_d)
 
     # callbacks = [early_stop_callback, checkpoint_callback]
@@ -174,7 +174,7 @@ def get_argparse():
     hparams_group.add_argument('--steps', help='Max number of steps per epoch', type=int, default=-1)
 
     input_group = parser.add_argument_group('Input')
-    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBRegression', 'SaxiOctree'])
+    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V'])
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     
     input_group.add_argument('--data_module', help='Data module type', required=True, type=str, default=None)
@@ -212,7 +212,7 @@ def get_argparse():
 if __name__ == '__main__':
     parser = get_argparse()
     initial_args, unknownargs = parser.parse_known_args()
-    model_args = getattr(saxi_nets, initial_args.nn)
+    model_args = getattr(saxi_nets_lightning, initial_args.nn)
     parser = model_args.add_model_specific_args(parser)
 
     data_module = getattr(saxi_dataset, initial_args.data_module)
