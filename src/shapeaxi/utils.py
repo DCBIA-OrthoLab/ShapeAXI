@@ -495,6 +495,35 @@ def ScaleSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
 
     return surf, mean_arr, scale_factor
 
+def RandomScaleT(surf, scale_range):
+    scale_factor = torch.rand(1) * (scale_range[1] - scale_range[0]) + scale_range[0]
+    surf, _, _ = ScaleSurfT(surf, mean_arr=torch.zeros(3), scale_factor=scale_factor)
+    return surf
+              
+def RandomScale(surf, scale_range):
+    scale_factor = np.random.random() * (scale_range[1] - scale_range[0]) + scale_range[0]
+    surf, _, _ = ScaleSurf(surf, mean_arr=np.zeros(3), scale_factor=scale_factor)
+    return surf
+
+def TranslateSurfT(surf, translation):
+    surf_translated = surf + translation
+    return surf_translated
+
+def TranslateSurf(surf, translation):
+    shapedatapoints = surf.GetPoints()
+    shape_points = vtk_to_numpy(shapedatapoints.GetData())
+    shape_points = shape_points + translation
+    shapedatapoints.SetData(numpy_to_vtk(shape_points))
+    return surf
+
+def RandomTranslationT(surf, translation_range):
+    translation = torch.rand(3) * (translation_range[1] - translation_range[0]) + translation_range[0]
+    return TranslateSurfT(surf, translation)
+
+def RandomTranslation(surf, translation_range):
+    translation = np.random.random(3) * (translation_range[1] - translation_range[0]) + translation_range[0]
+    return TranslateSurf(surf, translation)
+
 
 def GetActor(surf):
     surfMapper = vtk.vtkPolyDataMapper()

@@ -188,6 +188,7 @@ class SaxiDataModule(LightningDataModule):
             color_normals = pad_sequence(color_normals, batch_first=True, padding_value=0.0)
             
             return verts, faces, color_normals
+            
     
     def train_dataloader(self):
         return DataLoader(self.train_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, shuffle=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
@@ -256,6 +257,89 @@ class SaxiDataModuleVF(LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
 
+
+
+class SaxiDataModuleVFRRRSRT(LightningDataModule):
+    #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+
+        self.df_train = pd.read_csv(self.hparams.csv_train)
+        self.df_val = pd.read_csv(self.hparams.csv_valid)
+        self.df_test = pd.read_csv(self.hparams.csv_test)
+        self.mount_point = self.hparams.mount_point
+        self.batch_size = self.hparams.batch_size
+        self.num_workers = self.hparams.num_workers
+        self.surf_column = self.hparams.surf_column
+        self.class_column = self.hparams.class_column
+        self.scalar_column = self.hparams.scalar_column
+        self.surf_property = self.hparams.surf_property        
+        self.train_transform = saxi_transforms.TrainTransformRRRSRT(scale_range=self.hparams.scale_range, translation_range=self.hparams.translation_range)
+        self.valid_transform = None
+        self.test_transform = None
+        self.drop_last = self.hparams.drop_last
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("SaxiDataModuleVFRRRSRT")
+        
+        group.add_argument('--batch_size', type=int, default=16)
+        group.add_argument('--num_workers', type=int, default=6)
+        group.add_argument('--surf_column', type=str, default=None)
+        group.add_argument('--surf_property', type=str, default=None)
+        group.add_argument('--class_column', type=str, default=None)
+        group.add_argument('--scalar_column', type=str, default=None)
+        group.add_argument('--color_normals', type=int, default=1)
+        group.add_argument('--csv_train', type=str, default=None)
+        group.add_argument('--csv_valid', type=str, default=None)
+        group.add_argument('--csv_test', type=str, default=None)
+        group.add_argument('--mount_point', type=str, default="./")
+        group.add_argument('--drop_last', type=bool, default=False)
+        group.add_argument('--scale_range', type=float, nargs="+", default=(0.5, 1.5))
+        group.add_argument('--translation_range', type=str, nargs="+", default=(-0.05, 0.05))
+
+        return parent_parser
+
+    def setup(self, stage=None):
+        # Assign train/val datasets for use in dataloaders
+        # print("fff", stage)
+        self.train_ds = SaxiDataset(self.df_train, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.train_transform, CN=False)
+        self.val_ds = SaxiDataset(self.df_val, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.valid_transform, CN=False)
+        self.test_ds = SaxiDataset(self.df_test, self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.test_transform, CN=False)
+
+    def pad_verts_faces(self, batch):
+        # Collate function for the dataloader to know how to comine the data
+
+        if self.class_column:
+            verts = [v for v, f, c  in batch]
+            faces = [f for v, f, c in batch]
+            classes = [c for v, f, c in batch]  
+            
+            verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
+            faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+                
+            return verts, faces, torch.tensor(classes)
+        else:
+        
+            verts = [v for v, f  in batch]
+            faces = [f for v, f in batch]
+            
+            verts = pad_sequence(verts, batch_first=True, padding_value=0.0)        
+            faces = pad_sequence(faces, batch_first=True, padding_value=-1)
+                
+            return verts, faces
+
+
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, shuffle=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
 
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #

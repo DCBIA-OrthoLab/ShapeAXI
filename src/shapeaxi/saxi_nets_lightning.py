@@ -1965,6 +1965,173 @@ class SaxiAE(LightningModule):
         z = self.sampling(z_mu, z_sigma)
         X_hat = self.decoder(z)
         return X_hat
+    
+class SaxiIdxAE(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = MHAIdxEncoder(input_dim=self.hparams.input_dim, 
+                                     output_dim=self.hparams.stages[-1], 
+                                     K=self.hparams.K, 
+                                     num_heads=self.hparams.num_heads, 
+                                     stages=self.hparams.stages, 
+                                     dropout=self.hparams.dropout, 
+                                     pooling_factor=self.hparams.pooling_factor, 
+                                     pooling_hidden_dim=self.hparams.pooling_hidden_dim,
+                                     score_pooling=self.hparams.score_pooling,
+                                     feed_forward_hidden_dim=self.hparams.feed_forward_hidden_dim, 
+                                     use_skip_connection=self.hparams.use_skip_connection)
+        
+        self.decoder = MHAIdxDecoder(input_dim=self.hparams.stages[-1], 
+                                     output_dim=self.hparams.output_dim, 
+                                     K=self.hparams.K[::-1], 
+                                     num_heads=self.hparams.num_heads[::-1], 
+                                     stages=self.hparams.stages[::-1], 
+                                     dropout=self.hparams.dropout, 
+                                     pooling_hidden_dim=self.hparams.pooling_hidden_dim[::-1] if self.hparams.pooling_hidden_dim is not None else None,
+                                     feed_forward_hidden_dim=self.hparams.feed_forward_hidden_dim[::-1] if self.hparams.feed_forward_hidden_dim is not None else None,
+                                     use_skip_connection=self.hparams.use_skip_connection)
+        
+        self.ff_mu = FeedForward(self.hparams.stages[-1], hidden_dim=self.hparams.stages[-1], dropout=self.hparams.dropout)
+        self.ff_sigma = FeedForward(self.hparams.stages[-1], hidden_dim=self.hparams.stages[-1], dropout=self.hparams.dropout)
+
+        self.loss_fn = nn.MSELoss(reduction='sum')
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiIdxAE")
+
+        
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
+        
+        # Encoder/Decoder params
+        group.add_argument("--num_samples", type=int, default=8192, help='Number of samples to take from the mesh to start the encoding')
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')
+        group.add_argument("--K", type=int, nargs="*", default=[27, 27], help='Number of K neighbors for each stage')
+        group.add_argument("--num_heads", type=int, nargs="*", default=[64, 128], help='Number of attention heads per stage the encoder')
+        group.add_argument("--stages", type=int, nargs="*", default=[64, 128], help='Dimension per stage')
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.5, 0.5], help='Pooling factor')
+        group.add_argument("--score_pooling", type=int, default=0, help='Use score base pooling')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[32, 64], help='Hidden dim for the pooling layer')
+        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[32, 64], help='Hidden dim for the Residual FeedForward layer')
+        group.add_argument("--use_skip_connection", type=int, default=0, help='Use skip connections, i.e., unet style network')
+
+        # group.add_argument("--loss_mse_weight", type=float, default=1.0, help='Loss weight for the chamfer distance')
+        group.add_argument("--loss_chamfer_weight", type=float, default=1.0, help='Loss weight for the chamfer distance')
+        group.add_argument("--loss_mesh_face_weight", type=float, default=1.0, help='Loss weight for the mesh face distance')
+        group.add_argument("--loss_mesh_edge_weight", type=float, default=1.0, help='Loss weight for the mesh edge distance')
+        
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.ff_mu.parameters()) + list(self.ff_sigma.parameters()),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+    
+    def create_mesh_from_points(self, X):
+        dists = knn_points(X, X, K=3)
+        F = dists.idx
+        return Meshes(verts=X, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        return sample_points_from_meshes(x_mesh, Ns, return_normals=return_normals)
+    
+    def sample_points(self, x, Ns):
+        """
+        Samples Ns points from each batch in a tensor of shape (Bs, N, F).
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (Bs, N, F).
+            Ns (int): Number of points to sample from each batch.
+
+        Returns:
+            torch.Tensor: Output tensor of shape (Bs, Ns, F).
+        """
+        Bs, N, F = x.shape
+
+        # Generate random indices for sampling
+        indices = torch.randint(low=0, high=N, size=(Bs, Ns), device=x.device).unsqueeze(-1)
+
+        # Gather the sampled points
+        x = knn_gather(x, indices).squeeze(-2).contiguous()
+
+        return x, indices
+
+    def compute_loss(self, X_mesh, X, X_hat, step="train", sync_dist=False):
+        
+        # X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        
+        loss_chamfer, _ = chamfer_distance(X, X_hat, batch_reduction="mean", point_reduction="sum")        
+
+        # loss_mse = self.loss_fn(X, X_hat)
+
+        X_hat_PC = Pointclouds(X_hat)
+        loss_point_mesh_face = point_mesh_face_distance(X_mesh, X_hat_PC)
+        loss_point_mesh_edge = point_mesh_edge_distance(X_mesh, X_hat_PC)
+
+        # loss = loss_mse*self.hparams.loss_mse_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight
+        loss = loss_chamfer*self.hparams.loss_chamfer_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight
+
+        self.log(f"{step}_loss", loss, sync_dist=sync_dist)        
+        # self.log(f"{step}_loss_mse", loss_mse, sync_dist=sync_dist)
+        self.log(f"{step}_loss_chamfer", loss_chamfer, sync_dist=sync_dist)
+        self.log(f"{step}_loss_point_mesh_face", loss_point_mesh_face, sync_dist=sync_dist)
+        self.log(f"{step}_loss_point_mesh_edge", loss_point_mesh_edge, sync_dist=sync_dist)
+
+        return loss
+
+    def training_step(self, train_batch, batch_idx):
+        V, F = train_batch
+        
+        X_mesh = self.create_mesh(V, F)
+
+        X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+
+        X_hat = self(X)
+
+        loss = self.compute_loss(X_mesh, X, X_hat)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        V, F = val_batch
+        
+        X_mesh = self.create_mesh(V, F)
+
+        X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+
+        X_hat = self(X)
+
+        self.compute_loss(X_mesh, X, X_hat, step="val", sync_dist=True)
+
+    def sampling(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:        
+        eps = torch.randn_like(z_sigma)
+        z_vae = z_mu + eps * z_sigma
+        return z_vae
+
+    def forward(self, x):
+        skip_connections = None
+
+        if self.hparams.use_skip_connection:
+            h, unpooling_idxs, skip_connections = self.encoder(x, x)
+        else:
+            h, unpooling_idxs = self.encoder(x, x)
+        
+        z_mu = self.ff_mu(h)
+        z_sigma = self.ff_sigma(h)
+        z = self.sampling(z_mu, z_sigma)
+
+        return self.decoder(z, unpooling_idxs, skip_connections)
 
 
 class SaxiMHAClassification(LightningModule):
@@ -2248,160 +2415,6 @@ class SaxiMHAFBClassification(LightningModule):
 
         x = self.fc(x)
         return x, x_w, X
-    
-
-class SaxiD(LightningModule):
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.save_hyperparameters()
-        
-        self.decoder = SaxiMHADecoder(input_dim=self.hparams.output_dim,                                       
-                                      embed_dim=self.hparams.embed_dim, 
-                                      output_dim=self.hparams.input_dim, 
-                                      num_heads=self.hparams.num_heads, 
-                                      sample_levels=self.hparams.sample_levels,
-                                      K=self.hparams.K, 
-                                      dropout=self.hparams.dropout)
-        
-        # self.loss = nn.MSELoss(reduction='sum')
-    
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        group = parent_parser.add_argument_group("SaxiD")
-
-        group.add_argument("--lr", type=float, default=1e-4)
-        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.0001)
-        group.add_argument('--momentum', help='Momentum for optimizer', type=float, default=0.9)
-        
-        # Encoder parameters
-        
-        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
-        group.add_argument("--embed_dim", type=int, default=256, help='Embedding dimension')
-        group.add_argument("--num_heads", type=int, default=256, help='Number of attention heads')
-        group.add_argument("--output_dim", type=int, default=3, help='Output dimension from the encoder')
-        group.add_argument("--start_samples", type=int, default=128, help='Starting number of samples for the reconstruction')
-        group.add_argument("--end_samples", type=int, default=156, help='Number of samples for the reconstruction. start and end form the range of n samples used during training')
-        group.add_argument("--sample_levels", type=int, default=4, help='Number of sampling levels, i.e., max_samples=2^sample_levels*start_samples')        
-        
-        # group.add_argument("--hidden_dim", type=int, default=128, help='Hidden dimension size')
-        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
-        # Decoder parameters        
-        group.add_argument("--K", type=int, default=32, help='Top K nearest neighbors to consider in the decoder')
-
-        # group.add_argument("--loss_dist_weight", type=float, default=0.01, help='Loss weight for the edge distance during decoder stage')
-        group.add_argument("--loss_chamfer_weight", type=float, default=1.0, help='Loss weight for the chamfer distance')
-        group.add_argument("--loss_mesh_face_weight", type=float, default=1.0, help='Loss weight for the mesh face distance')
-        group.add_argument("--loss_mesh_edge_weight", type=float, default=1.0, help='Loss weight for the mesh edge distance')
-        group.add_argument("--loss_repulsion_weight", type=float, default=1.0, help='Loss weight for the mesh edge distance')
-
-        return parent_parser
-    
-    def configure_optimizers(self):
-        # optimizer = optim.AdamW(self.decoder.parameters(),
-        #                         lr=self.hparams.lr,
-        #                         weight_decay=self.hparams.weight_decay)
-        optimizer = optim.SGD(self.parameters(), lr=self.hparams.lr, momentum=self.hparams.momentum, weight_decay=self.hparams.weight_decay)
-        return optimizer
-    
-    def create_mesh(self, V, F):
-        return Meshes(verts=V, faces=F)
-    
-    def create_mesh_from_points(self, X):
-        dists = knn_points(X, X, K=3)
-        F = dists.idx
-        return Meshes(verts=X, faces=F)
-    
-    def sample_points(self, x, Ns):
-        return self.decoder.sample_points(x, Ns)
-    
-    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
-        if return_normals:
-            x, x_N = sample_points_from_meshes(x_mesh, Ns, return_normals=True)
-            return x, x_N
-        return sample_points_from_meshes(x_mesh, Ns)
-
-    def compute_loss(self, X_mesh, X_hat, step="train", sync_dist=False):
-        
-        
-        ns = int(math.pow(2.0, self.hparams.sample_levels)*self.hparams.start_samples)
-        X = self.sample_points_from_meshes(X_mesh, ns)
-        
-        loss_chamfer, loss_repulsion = self.chamfer_with_repulsion_loss(X, X_hat, batch_reduction="mean", point_reduction="sum")
-        # loss = loss_chamfer        
-        
-        # X_hat_ordered = knn_gather(X_hat, knn_points(X, X_hat, K=1).idx).squeeze(-2).contiguous()
-
-        X_hat = Pointclouds(X_hat)
-        loss_point_mesh_face = point_mesh_face_distance(X_mesh, X_hat)
-        loss_point_mesh_edge = point_mesh_edge_distance(X_mesh, X_hat)
-
-        loss = loss_chamfer*self.hparams.loss_chamfer_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight + loss_repulsion*self.hparams.loss_repulsion_weight
-
-        self.log(f"{step}_loss", loss, sync_dist=sync_dist)        
-        self.log(f"{step}_loss_chamfer", loss_chamfer, sync_dist=sync_dist)
-        self.log(f"{step}_loss_repulsion", loss_repulsion, sync_dist=sync_dist)
-        self.log(f"{step}_loss_point_mesh_face", loss_point_mesh_face, sync_dist=sync_dist)
-        self.log(f"{step}_loss_point_mesh_edge", loss_point_mesh_edge, sync_dist=sync_dist)
-
-        return loss
-    
-    def chamfer_with_repulsion_loss(self, pred, target, batch_reduction="mean", point_reduction="sum"):
-        """
-        Compute Chamfer loss with an additional repulsion term to penalize closely packed points.
-
-        Args:
-        - pred (torch.Tensor): Predicted point cloud of shape (Bs, Ns, 3).
-        - target (torch.Tensor): Target point cloud of shape (Bs, Nt, 3).
-        - repulsion_weight (float): Weight for the repulsion loss term.
-
-        Returns:
-        - total_loss (torch.Tensor): Combined Chamfer and repulsion loss.
-        """
-        # Compute Chamfer Loss using pytorch3d's chamfer_distance function
-        chamfer_loss, _ = chamfer_distance(pred, target, batch_reduction="mean", point_reduction="sum")
-
-        # Find k-nearest neighbors in the predicted point cloud
-        dists = knn_points(pred, pred, K=5)
-
-        # Compute Repulsion Loss
-        # knn_dist has shape (Bs, Ns, k) where each entry is the distance to one of the k-nearest neighbors
-        # We ignore the distance to itself (distance of zero) by starting from the second closest neighbor
-        repulsion_loss = 1.0 / (dists.dists[:, :, 1:] + 1e-8)  # Avoid division by zero
-        repulsion_loss = repulsion_loss.mean()
-
-        # Combine Chamfer Loss and Repulsion Loss
-        return chamfer_loss, repulsion_loss
-
-    def training_step(self, train_batch, batch_idx):
-        V, F = train_batch
-        
-        X_mesh = self.create_mesh(V, F)
-
-        sl = torch.randint(self.hparams.start_samples, self.hparams.end_samples, (1,)).item()
-
-        X = self.sample_points_from_meshes(X_mesh, sl)        
-        
-        X_hat = self(X)
-
-        loss = self.compute_loss(X_mesh, X_hat)
-
-        return loss
-
-    def validation_step(self, val_batch, batch_idx):
-        
-        V, F = val_batch
-        
-        X_mesh = self.create_mesh(V, F)
-
-        X = self.sample_points_from_meshes(X_mesh, self.hparams.start_samples)
-        
-        X_hat = self(X)
-
-        self.compute_loss(X_mesh, X_hat, step="val", sync_dist=True)
-
-    def forward(self, X):                
-        return self.decoder(X)
-    
 
 class SaxiMHAClassificationSingle(LightningModule):
     def __init__(self, **kwargs):
@@ -2827,7 +2840,7 @@ class SaxiMHAFBRegression_V(LightningModule):
     def forward(self, X_mesh):
         X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
         
-        x, x_v = self.encoder(X, X)
+        x, x_v, x_s_idx = self.encoder(X, X)
         x, x_s = self.attn(x, x)
 
         X_views, X_PF = self.render(X_mesh)
