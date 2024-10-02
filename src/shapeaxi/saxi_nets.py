@@ -599,7 +599,7 @@ class MHAIcoDecoder(nn.Module):
     
 
 class MHAIdxEncoder(nn.Module):
-    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_factor=None, pooling_hidden_dim=None, score_pooling=False, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False):          
+    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_factor=None, pooling_hidden_dim=None, score_pooling=False, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, return_v=False):
         super(MHAIdxEncoder, self).__init__()
 
         
@@ -613,6 +613,7 @@ class MHAIdxEncoder(nn.Module):
         self.feed_forward_hidden_dim = feed_forward_hidden_dim
         self.use_skip_connection = use_skip_connection
         self.use_layer_norm = use_layer_norm
+        self.return_v = return_v
 
         self.embedding = nn.Linear(input_dim, self.stages[0], bias=False)
 
@@ -662,7 +663,10 @@ class MHAIdxEncoder(nn.Module):
             x = getattr(self, f"output_{i}")(x)
         
         if self.use_skip_connection:
-            return x, unpooling_idxs, skip_connections
+            if self.return_v:
+                return x, x_v, unpooling_idxs, skip_connections
+        if self.return_v:
+            return x, x_v, unpooling_idxs
         return x, unpooling_idxs
     
 class MHAIdxDecoder(nn.Module):
