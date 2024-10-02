@@ -580,7 +580,10 @@ class Residual(nn.Module):
     def forward(self, x, *args, **kwargs):
         # Assume that the "query" tensor is given first, so we can compute the
         # residual.
-        return x + self.module(x, *args, **kwargs)
+        x_out = self.module(x, *args, **kwargs)
+        if isinstance(x_out, tuple):
+            return (x + x_out[0],) + x_out[1:]
+        return x + x_out
 
 class FeedForward(nn.Module):
     def __init__(self, embed_dim: int, hidden_dim: int, dropout: float = 0.1):
