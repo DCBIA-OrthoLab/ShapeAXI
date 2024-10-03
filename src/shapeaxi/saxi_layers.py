@@ -504,12 +504,15 @@ class MHA_KNN_V(nn.Module):
         self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)        
         self.use_direction = use_direction
     
-    def forward(self, x, x_v):
+    def forward(self, x, x_v, x_v_fixed=None):
 
         batch_size, V_n, Embed_dim = x.shape
         
         #input shape of x is [BS, V_n, Embed_dim]
-        dists = knn_points(x_v, x_v, K=self.K, return_sorted=self.return_sorted)            
+        if x_v_fixed is None:
+            x_v_fixed = x_v
+            
+        dists = knn_points(x_v_fixed, x_v, K=self.K, return_sorted=self.return_sorted)            
         # compute the key, the input shape is [BS, V_n, K, Embed_dim], it has the closest K points to the query. i.e, find the closest K points to each point in the point cloud
         k = knn_gather(x, dists.idx)
 
@@ -745,11 +748,18 @@ class AttentionPooling_V(nn.Module):
 
         return x, indices
 
-    def get_pooling_idx(self, x_s, x_v, pf, k):
+    def get_pooling_idx(self, x_s, x_v, pf, K, x_v_fixed=None):
 
         # Find next level points
-        if self.score_pooling:
-            n_samples = int(x_s.shape[1]*self.pooling_factor)
+        if x_v_fixed is not None:
+            n_samples = int(x_s.shape[1]*pf)
+            x_v_fixed = x_v_fixed[:, :n_samples]
+
+            dist = knn_points(x_v_fixed, x_v, K=1)
+            x_v_next = knn_gather(x_v, dist.idx).squeeze(2)
+        
+        elif self.score_pooling:
+            n_samples = int(x_s.shape[1]*pf)
             x_idx_next = torch.argsort(x_s, descending=True, dim=1)[:,:n_samples]
             x_v_next = knn_gather(x_v, x_idx_next).squeeze(2)
         else:
@@ -757,18 +767,18 @@ class AttentionPooling_V(nn.Module):
 
         # Find the closest points in the next level using the current level sampling, i.e., the output
         # dist.idx will have the indices of the points in the next level but dimension of the current level
-        pooling = knn_points(x_v_next, x_v, K=k)
-        unpooling = knn_points(x_v, x_v_next, K=k)
+        pooling = knn_points(x_v_next, x_v, K=K)
+        unpooling = knn_points(x_v, x_v_next, K=K)
 
-        return pooling.idx, unpooling.idx, x_v_next
+        return pooling.idx, unpooling.idx, x_v_next, x_v_fixed
     
-    def forward(self, x, x_v):
+    def forward(self, x, x_v, x_v_fixed=None):
 
         # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
 
         x_s = self.Sigmoid(self.V(self.Tanh(self.W1(x))))
         
-        pooling_idx, unpooling_idx, x_v = self.get_pooling_idx(x_s, x_v, self.pooling_factor, self.K)
+        pooling_idx, unpooling_idx, x_v, x_v_fixed = self.get_pooling_idx(x_s, x_v, pf=self.pooling_factor, K=self.K, x_v_fixed=x_v_fixed)
         
         x = knn_gather(x, pooling_idx)
         score = knn_gather(x_s, pooling_idx)
@@ -778,7 +788,7 @@ class AttentionPooling_V(nn.Module):
         x = attention_weights * x
         x = torch.sum(x, dim=2)
         
-        return x, x_v, x_s, pooling_idx, unpooling_idx
+        return x, x_v, x_s, pooling_idx, unpooling_idx, x_v_fixed
     
 class AttentionPooling_Idx(nn.Module):
     def __init__(self, embed_dim=128, hidden_dim=64):

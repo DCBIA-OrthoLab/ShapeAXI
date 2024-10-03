@@ -498,105 +498,6 @@ class MHAIcoDecoder(nn.Module):
         #output layer
         x = self.output(x)
         return x
-    
-# class MHAIcoDecoder(nn.Module):
-#     def __init__(self, input_dim=3, embed_dim=128, hidden_dim=64, num_heads=128, output_dim=3, sample_levels=5, dropout=0.1):
-#         super(MHAIcoDecoder, self).__init__()
-#         self.embed_dim = embed_dim
-#         self.num_heads = num_heads
-#         self.sample_levels = sample_levels
-#         self.dropout = dropout
-
-#         self.embedding = nn.Linear(input_dim, embed_dim)
-
-#         self.init_neighs(sample_levels)
-
-#         for i in range(sample_levels):
-
-#             setattr(self, f"mha_{i}", MHA_Idx(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout))
-#             # # setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim, hidden_dim=hidden_dim, dropout=dropout)))
-#             setattr(self, f"pool_{i}", AttentionPooling_Idx(embed_dim=embed_dim, hidden_dim=hidden_dim))
-        
-#         self.output = nn.Linear(embed_dim, output_dim)
-    
-#     def init_neighs(self, L):
-
-#         self.ico_neighs = []
-        
-#         for l in range(1, L):
-
-#             ico_s_current = ico_sphere(l).cuda()
-#             ico_v_current = ico_s_current.verts_packed().unsqueeze(0)
-#             ico_f_current = ico_s_current.faces_packed().unsqueeze(0)
-
-#             neigh_current = []
-                
-#             for pid in range(ico_v_current.shape[1]):
-#                 neigh = utils.GetNeighborsT(ico_f_current.squeeze(), pid)
-#                 neigh_current.append(neigh)
-
-#             neigh_current = pad_sequence(neigh_current, batch_first=True, padding_value=0)
-#             self.ico_neighs.append(neigh_current)
-
-#         self.ico_pooling_neighs = []
-#         for l in range(L - 1):
-
-#             # Find current level icosahedron
-#             ico_s_current = ico_sphere(l).cuda()
-#             ico_v_current = ico_s_current.verts_packed().unsqueeze(0)
-#             ico_f_current = ico_s_current.faces_packed().unsqueeze(0)
-
-#             # Find next level icosahedron
-#             ico_s_next = ico_sphere(l+1).cuda()
-#             ico_v_next = ico_s_next.verts_packed().unsqueeze(0)
-#             # ico_f_next = ico_s_next.faces_packed().unsqueeze(0)
-
-#             # Find the closest points in the current level icosahedron using the next level icosahedron
-#             dist = knn_points(ico_v_next, ico_v_current, K=1)
-
-#             # Find the neighbors of each point in the current level icosahedron
-#             neigh_current = []
-            
-#             for pid in dist.idx.squeeze():
-#                 neigh = utils.GetNeighborsT(ico_f_current.squeeze(), pid)
-#                 neigh_current.append(neigh)
-
-#             neigh_current = pad_sequence(neigh_current, batch_first=True, padding_value=0)
-#             # neigh_current = torch.stack(neigh_current, dim=0)
-#             # print(neigh_current.shape)
-
-#             # The shape of neigh_current is (N - 1, 6) where N is the number of points in the next level icosahedron
-#             # However, the ids in neigh_current are the ids of the points in the current level icosahedron. We can use this to pool features
-#             # and go to the next level
-#             # print(neigh_current.shape, ico_v_current.shape, ico_v_next.shape)
-
-            
-#             self.ico_pooling_neighs.append(neigh_current)
-        
-#     def forward(self, x):
-        
-#         batch_size = x.shape[0]
-#         x = self.embedding(x)
-
-#         repeats = [batch_size, 1, 1]
-        
-#         for i in range(self.sample_levels - 1):
-
-#             neigh_next = self.ico_pooling_neighs[i]
-#             neigh_next = neigh_next.repeat(repeats)
-#             x, x_s = getattr(self, f"pool_{i}")(x, neigh_next)
-            
-#             neigh = self.ico_neighs[i]
-#             neigh = neigh.repeat(repeats)
-#             # the mha will select optimal points from the input
-#             x = getattr(self, f"mha_{i}")(x, neigh)
-#             # print(x.shape)
-#             # x = getattr(self, f"ff_{i}")(x)
-
-#         #output layer
-#         x = self.output(x)
-#         return x
-    
 
 class MHAIdxEncoder(nn.Module):
     def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_factor=None, pooling_hidden_dim=None, score_pooling=False, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, return_v=False):
@@ -633,7 +534,7 @@ class MHAIdxEncoder(nn.Module):
             st_n = self.stages[i+1] if i+1 < len(self.stages) else output_dim
             setattr(self, f"output_{i}", nn.Linear(st, st_n, bias=False))
         
-    def forward(self, x, x_v):
+    def forward(self, x, x_v, x_v_fixed=None):
         
         x = self.embedding(x)
 
@@ -642,7 +543,7 @@ class MHAIdxEncoder(nn.Module):
         
         for i, st in enumerate(self.stages):
             
-            x = getattr(self, f"mha_{i}")(x, x_v)
+            x = getattr(self, f"mha_{i}")(x, x_v, x_v_fixed=x_v_fixed)
             if self.use_layer_norm:
                 x = getattr(self, f"norm_mha_{i}")(x)
             
@@ -656,7 +557,7 @@ class MHAIdxEncoder(nn.Module):
 
             if self.pooling_factor is not None and self.pooling_factor[i] is not None and self.pooling_hidden_dim is not None and self.pooling_hidden_dim[i] is not None: 
                 # pooling_idx, unpooling_idx, x_v_next = self.get_pooling_idx(x_v, self.pooling_factor[i], self.K[i])
-                x, x_v_next, x_s, pooling_idx, unpooling_idx = getattr(self, f"pool_{i}")(x, x_v)
+                x, x_v_next, x_s, pooling_idx, unpooling_idx, x_v_fixed = getattr(self, f"pool_{i}")(x, x_v, x_v_fixed=x_v_fixed)
                 unpooling_idxs.insert(0, (x_v, unpooling_idx, x_s))
                 x_v = x_v_next
 
