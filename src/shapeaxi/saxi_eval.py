@@ -25,6 +25,7 @@ import plotly.io as pio
 
 from shapeaxi import utils
 from shapeaxi.colors import bcolors
+from shapeaxi import saxi_nets_lightning
 
 # This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
@@ -361,6 +362,8 @@ def main(args):
         "SaxiMHA": SaxiClassification_eval,
         "SaxiSegmentation": SaxiSegmentation_eval,
         "SaxiRegression": SaxiRegression_eval,
+        "SaxiPointTransformer":SaxiClassification_eval,
+        "SaxiOctree":SaxiClassification_eval,
     }
     
     if args.nn in eval_functions:
@@ -382,7 +385,7 @@ def get_argparse():
   parser.add_argument('--class_column', type=str, help='Which column to do the stats on', default='class')
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingMT', 'SaxiRingClassification', 'SaxiMHA', 'SaxiOctree'])
+  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingMT', 'SaxiRingClassification', 'SaxiMHA', 'SaxiOctree', 'SaxiPointTransformer'])
   parser.add_argument('--title', type=str, help='Title for the image', default='Confusion matrix')
   parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')
@@ -395,7 +398,7 @@ def get_argparse():
 if __name__ == '__main__':
   parser = get_argparse()
   initial_args, unknownargs = parser.parse_known_args()
-  model_args = getattr(saxi_nets, initial_args.nn)
+  model_args = getattr(saxi_nets_lightning, initial_args.nn)
   model_args.add_model_specific_args(parser)
   args = parser.parse_args()
   main(args)

@@ -11,14 +11,14 @@ import torch
 
 from sklearn.utils import class_weight
 
-import lightning as L
+import pytorch_lightning as L
 
-from lightning import Trainer
-from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-from lightning.pytorch.callbacks import ModelCheckpoint
-from lightning.pytorch.strategies import DDPStrategy
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.strategies import DDPStrategy
 
-from lightning.pytorch.loggers import NeptuneLogger
+from pytorch_lightning.loggers import NeptuneLogger
 
 from shapeaxi import saxi_dataset 
 from shapeaxi.saxi_transforms import *
@@ -174,7 +174,11 @@ def get_argparse():
     hparams_group.add_argument('--steps', help='Max number of steps per epoch', type=int, default=-1)
 
     input_group = parser.add_argument_group('Input')
-    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V'])
+    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, 
+                             choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification',
+                                       'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 
+                                       'SaxiMHA', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 
+                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer'])
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     
     input_group.add_argument('--data_module', help='Data module type', required=True, type=str, default=None)
