@@ -33,6 +33,8 @@ from pytorch3d.loss import (
 from pytorch3d.utils import ico_sphere
 from torch.nn.utils.rnn import pad_sequence
 
+# from shapeaxi.saxi_point_nets import *
+
 import json
 import os
 
@@ -44,8 +46,8 @@ from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
 from shapeaxi.colors import bcolors
 from shapeaxi.saxi_losses import saxi_point_triangle_distance
 
-import lightning as L
-from lightning.pytorch.core import LightningModule
+import pytorch_lightning as L
+from pytorch_lightning.core import LightningModule
 
 
 
@@ -2249,6 +2251,41 @@ class SaxiMHAFBClassification(LightningModule):
         x = self.fc(x)
         return x, x_w, X
     
+    def test_step(self, val_batch, batch_idx):
+        
+        V, F, CN, Y = val_batch
+
+        Y = self.soft_class_probabilities(Y)
+        
+        X_mesh = self.create_mesh(V, F, CN)
+        X_hat, _, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_hat, Y)
+        predictions = torch.argmax(X_hat, dim=1)
+        output = [predictions,torch.argmax(Y, dim=1)]
+        return output 
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+
+        df_out = pd.read_csv(self.hparams.csv_test)
+        df_out['pred'] = y_pred
+
+        out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
+        out_dir = self.hparams.out.split('epoch')[0]
+        out_name = os.path.basename(self.hparams.csv_test)
+
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
 
 class SaxiD(LightningModule):
     def __init__(self, **kwargs):
@@ -2840,6 +2877,40 @@ class SaxiMHAFBRegression_V(LightningModule):
         x = self.fc(x)
         return x, x_s, X
 
+    def test_step(self, test_batch, batch_idx):
+        V, F, CN, Y = test_batch
+
+        X_mesh = self.create_mesh(V, F, CN)
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat,_ ,_ = self(X_mesh)
+
+        predictions = X_hat[0]
+        output = [predictions,Y]
+
+        return output
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+
+        df_out = pd.read_csv(self.hparams.csv_test)
+        df_out['pred'] = y_pred
+
+        out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
+        out_dir = self.hparams.out.split('epoch')[0]
+        out_name = os.path.basename(self.hparams.csv_test)
+
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
 
 
 
@@ -3241,6 +3312,144 @@ class SaxiOctree(LightningModule):
 
 
 
+#### PointTransformerV2
+class SaxiPointTransformer(LightningModule):
+    def __init__(self, **kwargs):
+        super(SaxiPointTransformer, self).__init__()
+        self.save_hyperparameters()
+        self.y_pred = []
+        self.y_true = []
+
+        
+        self.model = PointTransformerV2(in_channels=self.hparams.in_channels, num_classes=self.hparams.num_classes)
+
+        # Loss
+        self.loss_train = nn.CrossEntropyLoss()
+        self.loss_val = nn.CrossEntropyLoss()
+        self.loss_test = nn.CrossEntropyLoss()
+
+        #vAccuracy
+        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.num_classes,average='macro')
+        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.num_classes,average='macro')
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiOctree")
+        
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument("--out_classes", type=int, default=2)
+
+        # PointTransformerV2 params
+        group.add_argument("--in_channels", type=int, default=3)
+        # group.add_argument("--dropout", type=float, default=0.1)
+        group.add_argument("--num_classes", type=int, default=4)
+        # group.add_argument('--input_feature', type=str, help='Type of features to get from the octree', default='P')
+        # group.add_argument('--resblock_num', type=int, help='Number of residual blocks', default=1)
+        # group.add_argument('--stages', type=int, help='Number of stages', default=3)
+        # group.add_argument('--depth', type=int, help='Start depth', default=16)
+        # group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.5)
+        # group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=2)
+        # group.add_argument('--image_size', type=int, help='Image resolution size', default=256)
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        return optimizer
+
+    def forward(self, coords, feats, offset):
+
+        return self.model(coords, feats, offset)
+
+    def training_step(self, train_batch, batch_idx):
+        coords, feats, batch_index, Y = train_batch
+
+        offset = batch2offset(batch_index)
+
+        logit,pts = self(coords, feats, offset)
+
+        Y = Y.type(torch.LongTensor).cuda()
+
+        loss = self.loss_train(logit, Y)
+        self.log('train_loss', loss, batch_size=self.hparams.batch_size,sync_dist=True)
+        predictions = torch.argmax(logit, dim=1,keepdim=True)
+
+        self.train_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("train_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
+
+        return loss
+
+    def validation_step(self,val_batch,batch_idx):
+        coords, feats, batch_index, Y = val_batch
+
+        offset = batch2offset(batch_index)
+
+        logit,pts = self(coords, feats, offset)
+
+        Y = Y.type(torch.LongTensor).cuda()
+
+        loss = self.loss_train(logit, Y)
+        self.log('val_loss', loss, batch_size=self.hparams.batch_size,sync_dist=True)
+        predictions = torch.argmax(logit, dim=1,keepdim=True)
+
+        self.train_accuracy(predictions, Y.reshape(-1, 1))
+        self.log("val_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
+
+
+    def test_step(self,test_batch,batch_idx):
+        coords, feats, batch_index, Y = test_batch
+
+        offset = batch2offset(batch_index)
+
+        logit,pts = self(coords, feats, offset)
+
+        Y = Y.type(torch.LongTensor).cuda()
+
+        loss = self.loss_train(logit, Y)
+        self.log('test_loss', loss, batch_size=self.hparams.batch_size,sync_dist=True)
+        predictions = torch.argmax(logit, dim=1)
+
+        self.train_accuracy(predictions, Y)
+        self.log("test_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
+
+        output = [predictions,Y]
+
+        return output
+
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+        #Classification report
+        print(self.y_pred)
+        print(self.y_true)
+        print(classification_report(self.y_true, self.y_pred))
+
+        self.save_results_to_csv(y_true=self.y_true, y_pred=self.y_pred)
+
+    def save_results_to_csv(self, y_true, y_pred):
+
+        csv_test = self.hparams.csv_test
+        df = pd.read_csv(csv_test)
+        df['pred'] = y_pred
+        out_dir = os.path.splitext(self.hparams.out)[0]
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+
+        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+        df.to_csv(out_filename)
+
+        report = classification_report(self.y_true, self.y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+        df_report.to_csv(report_filename)
+    
 ## DEPRECATED
 
 class SaxiRing(LightningModule):
