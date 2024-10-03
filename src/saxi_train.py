@@ -87,12 +87,12 @@ def Saxi_train(args, callbacks):
     args_d = vars(args)
 
 
-    train_transform = TrainTransform(scale_factor=args.scale_factor)
-    valid_transform = EvalTransform(scale_factor=args.scale_factor)
+    # train_transform = TrainTransform(scale_factor=args.scale_factor)
+    # valid_transform = EvalTransform(scale_factor=args.scale_factor)
     
-    args_d['train_transform'] = train_transform
-    args_d['valid_transform'] = valid_transform
-    args_d['test_transform'] = valid_transform
+    # args_d['train_transform'] = train_transform
+    # args_d['valid_transform'] = valid_transform
+    # args_d['test_transform'] = valid_transform
 
     data = DATAMODULE(**args_d)
     
@@ -166,7 +166,7 @@ def main(args):
 
 
 def get_argparse():
-    parser = argparse.ArgumentParser(description='Diffusion training')
+    parser = argparse.ArgumentParser(description='Shape Analysis Explainability and Interpretability training script.')
 
     hparams_group = parser.add_argument_group('Hyperparameters')
     hparams_group.add_argument('--epochs', help='Max number of epochs', type=int, default=200)

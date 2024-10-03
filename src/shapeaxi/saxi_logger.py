@@ -479,8 +479,10 @@ class SaxiAELoggerNeptune(Callback):
 
                 if hasattr(pl_module.hparams, 'start_samples'):
                     X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.start_samples)
-                else:
+                elif hasattr(pl_module.hparams, 'sample_levels'):
                     X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.sample_levels[0])
+                elif hasattr(pl_module.hparams, 'num_samples'):
+                    X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.num_samples)
                 
                 X_hat = pl_module(X)                
 
@@ -489,8 +491,10 @@ class SaxiAELoggerNeptune(Callback):
 
                 if hasattr(pl_module.hparams, 'start_samples'):
                     X_start_samples = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.start_samples)
-                else:
+                elif hasattr(pl_module.hparams, 'sample_levels'):
                     X_start_samples = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.sample_levels[-1])
+                elif hasattr(pl_module.hparams, 'num_samples'):
+                    X_start_samples = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.num_samples)
                 
                 
                 fig = self.plot_pointclouds(X_start_samples[0].cpu().numpy(), X_samples[0].cpu().numpy(), X_samples_hat[0].detach().cpu().numpy())

@@ -64,6 +64,28 @@ class RandomRotation:
         else:
             surf, _a, _v = utils.RandomRotation(surf)
         return surf
+    
+class RandomScale:
+    # This transform is used to make sure that the surface is in the unit cube
+    def __init__(self, scale_range=(1.0, 1.0)):
+        self.scale_range = scale_range
+    def __call__(self, surf):
+        if isinstance(surf, torch.Tensor):
+            surf = utils.RandomScaleT(surf, self.scale_range)      
+        else:
+            surf = utils.RandomScale(surf, self.scale_range)
+        return surf
+
+class RandomTranslation:
+    # This transform is used to make sure that the surface is in the unit cube
+    def __init__(self, translation_range=(0.0, 0.0)):
+        self.translation_range = translation_range
+    def __call__(self, surf):
+        if isinstance(surf, torch.Tensor):
+            surf = utils.RandomTranslationT(surf, self.translation_range)      
+        else:
+            surf = utils.RandomTranslation(surf, self.translation_range)
+        return surf
 
 class RandomRemoveLabeledRegionTransform:
     # This transform is used to remove a random labeled region from the surface
@@ -118,6 +140,20 @@ class EvalTransform:
 
     def __call__(self, surf):
         return self.eval_transform(surf)
+    
+class TrainTransformRRRSRT:
+    # This transform is used to make sure that the surface is in the unit cube
+    def __init__(self, scale_range=(1.0, 1.0), translation_range=(0.0, 0.0)):
+        self.train_transform = transforms.Compose(
+            [
+                RandomRotation(),
+                RandomScale(scale_range=scale_range),
+                RandomTranslation(translation_range=translation_range)
+            ]
+        )
+
+    def __call__(self, surf):
+        return self.train_transform(surf)
 
 
 class TriangleFilter:
