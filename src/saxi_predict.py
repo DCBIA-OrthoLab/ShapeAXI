@@ -6,7 +6,7 @@ from shapeaxi import saxi_nets
 from shapeaxi.saxi_transforms import *
 from shapeaxi import saxi_nets_lightning
 
-from pytorch_lightning import Trainer
+from lightning import Trainer
 
 def main(args):
 

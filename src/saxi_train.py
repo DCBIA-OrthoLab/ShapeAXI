@@ -11,14 +11,14 @@ import torch
 
 from sklearn.utils import class_weight
 
-import pytorch_lightning as L
+import lightning as L
+ 
+from lightning import Trainer
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.strategies import DDPStrategy
 
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.strategies import DDPStrategy
-
-from pytorch_lightning.loggers import NeptuneLogger
+from lightning.pytorch.loggers import NeptuneLogger
 
 from shapeaxi import saxi_dataset 
 from shapeaxi.saxi_transforms import *
@@ -87,12 +87,12 @@ def Saxi_train(args, callbacks):
     args_d = vars(args)
 
 
-    # train_transform = TrainTransform(scale_factor=args.scale_factor)
-    # valid_transform = EvalTransform(scale_factor=args.scale_factor)
+    train_transform = TrainTransform(scale_factor=args.scale_factor)
+    valid_transform = EvalTransform(scale_factor=args.scale_factor)
     
-    # args_d['train_transform'] = train_transform
-    # args_d['valid_transform'] = valid_transform
-    # args_d['test_transform'] = valid_transform
+    args_d['train_transform'] = train_transform
+    args_d['valid_transform'] = valid_transform
+    args_d['test_transform'] = valid_transform
 
     data = DATAMODULE(**args_d)
     
@@ -132,14 +132,14 @@ def Saxi_train(args, callbacks):
     logger_neptune = None
     if args.neptune_tags:
         logger_neptune = NeptuneLogger(
-            project='ImageMindAnalytics/saxi',
+            project='ImageMindAnalytics/saxinets',
             tags=args.neptune_tags,
             api_key=os.environ['NEPTUNE_API_TOKEN'],
             log_model_checkpoints=False
         )
         LOGGER = getattr(saxi_logger, args.logger)    
-        image_logger = LOGGER(log_steps=args.log_every_n_steps)
-        callbacks.append(image_logger)
+        # image_logger = LOGGER(log_steps=args.log_every_n_steps)
+        # callbacks.append(image_logger)
 
     trainer = Trainer(logger=logger_neptune,max_epochs=args.epochs, log_every_n_steps=args.log_every_n_steps,callbacks=callbacks,devices=torch.cuda.device_count(), accelerator="gpu", strategy=DDPStrategy(find_unused_parameters=False),num_sanity_val_steps=0)
     trainer.fit(model, datamodule=data, ckpt_path=args.model)
@@ -150,14 +150,15 @@ def main(args):
         dirpath=args.out,
         filename='{epoch}-{val_loss:.2f}',
         save_top_k=2,
-        monitor='val_loss'
+        monitor='val_loss',
+        save_last=True
     )
     
     # Early Stopping
     early_stop_callback = EarlyStopping(
         monitor="val_loss", 
         min_delta=0.00, 
-        patience=args.patience, 
+        patience=200, 
         verbose=True, 
         mode="min"
     )
@@ -178,7 +179,8 @@ def get_argparse():
                              choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification',
                                        'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 
                                        'SaxiMHA', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 
-                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer'])
+                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V'])
+
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     
     input_group.add_argument('--data_module', help='Data module type', required=True, type=str, default=None)
