@@ -500,7 +500,10 @@ class MHAIcoDecoder(nn.Module):
         return x
 
 class MHAIdxEncoder(nn.Module):
-    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_factor=None, pooling_hidden_dim=None, score_pooling=False, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, return_v=False):
+    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, 
+                pooling_factor=None, pooling_hidden_dim=None, score_pooling=False, 
+                 feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, 
+                 use_layer_norm=False, return_v=True):
         super(MHAIdxEncoder, self).__init__()
 
         
@@ -543,7 +546,7 @@ class MHAIdxEncoder(nn.Module):
         
         for i, st in enumerate(self.stages):
             
-            x = getattr(self, f"mha_{i}")(x, x_v, x_v_fixed=x_v_fixed)
+            x, x_w = getattr(self, f"mha_{i}")(x, x_v, x_v_fixed=x_v_fixed)
             if self.use_layer_norm:
                 x = getattr(self, f"norm_mha_{i}")(x)
             

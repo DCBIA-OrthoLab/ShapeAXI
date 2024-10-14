@@ -494,7 +494,7 @@ class MHA_KNN(nn.Module):
         return x
 
 class MHA_KNN_V(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, return_weights=False, K=6, return_sorted=True, use_direction=True):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, return_weights=True, K=6, return_sorted=True, use_direction=True):
         super(MHA_KNN_V, self).__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
