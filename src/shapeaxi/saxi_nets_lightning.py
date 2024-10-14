@@ -46,8 +46,8 @@ from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
 from shapeaxi.colors import bcolors
 from shapeaxi.saxi_losses import saxi_point_triangle_distance
 
-import pytorch_lightning as L
-from pytorch_lightning.core import LightningModule
+import lightning as L
+from lightning.pytorch.core import LightningModule
 
 
 
@@ -2216,6 +2216,48 @@ class SaxiMHAClassification(LightningModule):
         
         self.log("val_loss", loss, sync_dist=True)
 
+    def test_step(self, val_batch, batch_idx):
+
+        print(len(val_batch))
+        
+        V, F, CN, Y = val_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_mesh, X_hat)
+        
+        self.log("val_loss", loss, sync_dist=True)
+
+        predictions = torch.argmax(X_hat, dim=1)
+        output = [predictions,Y]
+        return output 
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+
+        df_out = pd.read_csv(self.hparams.csv_test)
+        df_out['pred'] = y_pred
+
+        out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
+        out_dir = self.hparams.out.split('epoch')[0]
+        out_name = os.path.basename(self.hparams.csv_test)
+
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+
+
+
+
     def forward(self, X_mesh):
         X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[-1])
         x, x_w = self.encoder(X)
@@ -2453,6 +2495,256 @@ class SaxiMHAFBClassification(LightningModule):
             os.makedirs(out_dir)
 
         df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+
+
+class SaxiMHAFBClassification_V(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = MHAIdxEncoder(input_dim=self.hparams.input_dim, 
+                                    output_dim=self.hparams.output_dim,
+                                    K=self.hparams.K,
+                                    num_heads=self.hparams.num_heads,
+                                    stages=self.hparams.stages,
+                                    dropout=self.hparams.dropout,
+                                    pooling_factor=self.hparams.pooling_factor,
+                                    pooling_hidden_dim=self.hparams.pooling_hidden_dim, 
+                                    score_pooling=False)
+        
+        
+        self.attn = SelfAttention(self.hparams.output_dim, self.hparams.hidden_dim)
+
+        effnet = monai.networks.nets.EfficientNetBN('efficientnet-b0', spatial_dims=2, in_channels=4, num_classes=self.hparams.output_dim)
+        self.convnet = TimeDistributed(effnet)
+        self.mha_fb = nn.MultiheadAttention(self.hparams.output_dim, self.hparams.num_heads[-1], dropout=self.hparams.dropout, batch_first=True)
+        self.attn_fb = SelfAttention(self.hparams.output_dim, self.hparams.hidden_dim)
+
+        self.fc = nn.Linear(self.hparams.output_dim*2, self.hparams.num_classes)
+        
+        cameras = FoVPerspectiveCameras()
+
+        raster_settings = RasterizationSettings(image_size=self.hparams.image_size, blur_radius=0, faces_per_pixel=1,max_faces_per_bin=200000)        
+        rasterizer = MeshRasterizer(cameras=cameras, raster_settings=raster_settings)
+        lights = AmbientLights()
+        self.renderer = MeshRenderer(rasterizer=rasterizer,shader=HardPhongShader(cameras=cameras, lights=lights))
+        self.ico_sphere(radius=self.hparams.radius, subdivision_level=self.hparams.subdivision_level)
+        
+        self.loss = nn.CrossEntropyLoss()
+        
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.num_classes)
+
+        centers = torch.tensor([12.5000, 37.5000, 62.5000, 87.5000], dtype=torch.float32)
+        self.register_buffer("centers", centers)
+        widths = torch.tensor([12.5000, 12.5000, 12.5000, 12.5000], dtype=torch.float32)
+        self.register_buffer("widths", widths)
+        
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiMHAFBClassification")
+
+        group.add_argument("--lr", type=float, default=1e-4)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
+        
+        # Encoder parameters
+        
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=256, help='Embedding dimension')
+        group.add_argument("--hidden_dim", type=int, default=64, help='Embedding dimension')
+        group.add_argument("--image_size", type=int, default=224, help='Image size for rendering')
+        group.add_argument("--radius", type=float, default=1.35, help='Radius of the icosphere/camera positions')
+        group.add_argument("--subdivision_level", type=int, default=2, help='Subdivision level of the ico sphere')
+        group.add_argument("--K", type=int, nargs="+",  default=[27, 125, 125], help='Top K nearest neighbors to consider in the encoder')
+        group.add_argument("--num_heads", type=int, default=[32, 64, 128], help='Number of attention heads for the encoder')
+        group.add_argument("--stages", type=int, nargs="+", default=[32, 64, 128], help='Number of attention heads for the encoder')
+        group.add_argument("--pooling_factor", type=int, nargs="+", default=[0.25, 0.25, 0.25], help='Number of attention heads for the encoder')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="+", default=[4, 8, 16], help='')
+
+
+        group.add_argument("--output_dim", type=int, default=256, help='Output dimension from the encoder')        
+        group.add_argument("--sample_level", type=int, default=4096, help='Number of sampling levels in the encoder')                
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+
+        # classification parameters
+        group.add_argument("--num_classes", type=int, default=4, help='Number of output classes')
+
+        return parent_parser
+    
+    def ico_sphere(self, radius=1.1, subdivision_level=1):
+        # Create an icosphere
+        ico_verts, ico_faces, ico_edges = utils.PolyDataToTensors(utils.CreateIcosahedronSubdivided(radius=radius, sl=subdivision_level))
+        ico_verts = ico_verts.to(torch.float32)
+
+        for idx, v in enumerate(ico_verts):
+            if (torch.abs(torch.sum(v)) == radius):
+                ico_verts[idx] = v + torch.tensor([-1.2447e-05, -3.7212e-06, -1.5617e-06])
+        
+        self.register_buffer("ico_verts", ico_verts)
+
+    def to(self, device=None):
+        # Move the renderer to the specified device
+        self.renderer = self.renderer.to(device)
+        return super().to(device)
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F, CN=None):
+        
+        if CN is not None:
+            textures = TexturesVertex(verts_features=CN.to(torch.float32))
+            return Meshes(verts=V, faces=F, textures=textures)
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        if return_normals:
+            x, x_N = sample_points_from_meshes(x_mesh, Ns, return_normals=True)
+            return x, x_N
+        return sample_points_from_meshes(x_mesh, Ns)
+    
+    def sample_uniform(self, V, Ns):
+        x_v_fixed = []
+        for v in V:
+            # remove the potention 0 paddign of collate_fn
+            non_zeros_idx = torch.nonzero(v)[:,0]
+            v_non_zeros = v[non_zeros_idx,:]
+
+            sampled_indices = np.random.choice(v_non_zeros.shape[0], Ns, replace=False)
+            x_v_fixed.append(v_non_zeros[sampled_indices])
+        return torch.stack(x_v_fixed)
+
+    def render(self, meshes):
+        # Render the input surface mesh to an image
+        
+        X = []
+        PF = []
+
+        for camera_position in self.ico_verts:
+            camera_position = camera_position.unsqueeze(0)
+            R = look_at_rotation(camera_position, device=self.device)  # (1, 3, 3)
+            T = -torch.bmm(R.transpose(1, 2), camera_position[:,:,None])[:, :, 0]   # (1, 3)
+            images = self.renderer(meshes_world=meshes.clone(), R=R, T=T)        
+            fragments = self.renderer.rasterizer(meshes.clone())
+            pix_to_face = fragments.pix_to_face
+            zbuf = fragments.zbuf
+            images = torch.cat([images[:,:,:,0:3], zbuf], dim=-1)
+            images = images.permute(0,3,1,2)
+            pix_to_face = pix_to_face.permute(0,3,1,2)
+            X.append(images.unsqueeze(1))
+            PF.append(pix_to_face.unsqueeze(1))
+        
+        X = torch.cat(X, dim=1)
+        PF = torch.cat(PF, dim=1)        
+
+        return X, PF
+
+    def compute_loss(self, X_hat, Y):
+        return self.loss(X_hat, Y)
+    
+    def soft_class_probabilities(self, values):
+        # Calculate unscaled probabilities using a Gaussian-like function
+        # Here, we use the negative squared distance scaled by width as logits
+        values = values.unsqueeze(-1)
+        logits = -(values - self.centers) ** 2 / (2 * self.widths ** 2)
+        
+        # Apply softmax to convert logits into probabilities
+        probabilities = F.softmax(logits, dim=1)
+        
+        return probabilities
+
+    def training_step(self, train_batch, batch_idx):
+        V, F, CN, Y = train_batch
+
+        # Y = self.soft_class_probabilities(Y)
+        
+        X_mesh = self.create_mesh(V, F, CN)
+        X_hat, _, _ = self(X_mesh)
+        loss = self.compute_loss(X_hat, Y)
+        
+        self.log("train_loss", loss)
+        # self.accuracy(X_hat, torch.argmax(Y, dim=1))
+        self.accuracy(X_hat, Y)
+        self.log("train_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True) 
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        V, F, CN, Y = val_batch
+
+        # Y = self.soft_class_probabilities(Y)
+        
+        X_mesh = self.create_mesh(V, F, CN)
+        X_hat, _, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_hat, Y)
+        
+        self.log("val_loss", loss, sync_dist=True)
+        # self.accuracy(X_hat, torch.argmax(Y, dim=1))
+        self.accuracy(X_hat, Y)
+
+        self.log("val_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True)
+
+    # def forward(self, X_pc, X_views, x_v_fixed):
+    def forward(self, X_mesh):
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+        X_views, X_PF = self.render(X_mesh)
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list(), self.hparams.sample_level)
+        
+        x, x_v, unpooling_idxs = self.encoder(X_pc, X_pc, x_v_fixed)
+        x, x_s = self.attn(x, x)
+
+        x_fb = self.convnet(X_views)
+        x_fb, x_fb_mha_s = self.mha_fb(x_fb, x_fb, x_fb)
+        x_fb, x_fb_s = self.attn_fb(x_fb, x_fb)
+
+        x = torch.cat([x, x_fb], dim=1)
+
+        x = self.fc(x)
+        return x, x_s, X_pc
+        return x
+
+    def test_step(self, val_batch, batch_idx):
+        
+        V, F, CN, Y = val_batch
+
+        # Y = self.soft_class_probabilities(Y)
+        
+        X_mesh = self.create_mesh(V, F, CN)
+        X_hat, _, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_hat, Y)
+        predictions = torch.argmax(X_hat, dim=1)
+
+        output = [predictions, Y]
+        return output 
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+
+        df_out = pd.read_csv(self.hparams.csv_test)
+        df_out['pred'] = y_pred
+
+        # out_dir = os.path.join(self.hparams.model.split('epoch')[0], 'test')
+        out_dir = self.hparams.out.split('.ckpt')[0]
+        out_name = os.path.splitext(os.path.basename(self.hparams.csv_test))[0]
+
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+
+
 
 class SaxiD(LightningModule):
     def __init__(self, **kwargs):
@@ -2882,14 +3174,25 @@ class SaxiMHAFBRegression_V(LightningModule):
         self.save_hyperparameters()
 
 
-        self.encoder = MHAEncoder_V(input_dim=self.hparams.input_dim, 
+        # self.encoder = MHAEncoder_V(input_dim=self.hparams.input_dim, 
+        #                             output_dim=self.hparams.output_dim,
+        #                             K=self.hparams.K,
+        #                             num_heads=self.hparams.num_heads,
+        #                             stages=self.hparams.stages,
+        #                             dropout=self.hparams.dropout,
+        #                             pooling_factor=self.hparams.pooling_factor)
+        
+        self.encoder = MHAIdxEncoder(input_dim=self.hparams.input_dim, 
                                     output_dim=self.hparams.output_dim,
                                     K=self.hparams.K,
                                     num_heads=self.hparams.num_heads,
                                     stages=self.hparams.stages,
                                     dropout=self.hparams.dropout,
-                                    pooling_factor=self.hparams.pooling_factor)
+                                    pooling_factor=self.hparams.pooling_factor,
+                                    pooling_hidden_dim=self.hparams.pooling_hidden_dim, 
+                                    score_pooling=False)
         
+
         self.attn = SelfAttention(self.hparams.output_dim, self.hparams.hidden_dim)
 
         effnet = monai.networks.nets.EfficientNetBN('efficientnet-b0', spatial_dims=2, in_channels=4, num_classes=self.hparams.output_dim)
@@ -2929,7 +3232,9 @@ class SaxiMHAFBRegression_V(LightningModule):
         group.add_argument("--num_heads", type=int, default=[32, 64, 128], help='Number of attention heads for the encoder')
         group.add_argument("--stages", type=int, nargs="+", default=[32, 64, 128], help='Number of attention heads for the encoder')
         group.add_argument("--pooling_factor", type=int, nargs="+", default=[0.25, 0.25, 0.25], help='Number of attention heads for the encoder')
-        
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="+", default=[4, 8, 16], help='')
+
+
         group.add_argument("--output_dim", type=int, default=256, help='Output dimension from the encoder')        
         group.add_argument("--sample_level", type=int, default=4096, help='Number of sampling levels in the encoder')                
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
@@ -2974,6 +3279,17 @@ class SaxiMHAFBRegression_V(LightningModule):
             x, x_N = sample_points_from_meshes(x_mesh, Ns, return_normals=True)
             return x, x_N
         return sample_points_from_meshes(x_mesh, Ns)
+    
+    def sample_uniform(self, V, Ns):
+        x_v_fixed = []
+        for v in V:
+            # remove the potention 0 paddign of collate_fn
+            non_zeros_idx = torch.nonzero(v)[:,0]
+            v_non_zeros = v[non_zeros_idx,:]
+
+            sampled_indices = np.random.choice(v_non_zeros.shape[0], Ns, replace=False)
+            x_v_fixed.append(v_non_zeros[sampled_indices])
+        return torch.stack(x_v_fixed)
     
     def render(self, meshes):
         # Render the input surface mesh to an image
@@ -3028,9 +3344,11 @@ class SaxiMHAFBRegression_V(LightningModule):
         self.log("val_loss", loss, sync_dist=True)
 
     def forward(self, X_mesh):
-        X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
         
-        x, x_v, x_s_idx = self.encoder(X, X)
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list() ,self.hparams.sample_level)
+        
+        x, x_v, unpooling_idxs = self.encoder(X_pc, X_pc, x_v_fixed)
         x, x_s = self.attn(x, x)
 
         X_views, X_PF = self.render(X_mesh)
@@ -3041,7 +3359,7 @@ class SaxiMHAFBRegression_V(LightningModule):
         x = torch.cat([x, x_fb], dim=1)
 
         x = self.fc(x)
-        return x, x_s, X
+        return x, x_s, X_pc
 
     def test_step(self, test_batch, batch_idx):
         V, F, CN, Y = test_batch
@@ -3071,7 +3389,7 @@ class SaxiMHAFBRegression_V(LightningModule):
 
         out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
         out_dir = self.hparams.out.split('epoch')[0]
-        out_name = os.path.basename(self.hparams.csv_test)
+        out_name = os.splitext(os.path.basename(self.hparams.csv_test))
 
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
