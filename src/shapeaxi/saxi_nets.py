@@ -37,6 +37,9 @@ import json
 import os
 
 
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence as pack_sequence, pad_packed_sequence as unpack_sequence
+import torch.nn as nn
+
 from shapeaxi import utils
 from shapeaxi.saxi_layers import *
 from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
@@ -639,3 +642,87 @@ class MHAIdxDecoder(nn.Module):
             x = getattr(self, f"output_{i}")(x)
         
         return x
+
+class PointTransformerV2(nn.Module):
+    def __init__(self,in_channels,num_classes,patch_embed_depth=1,patch_embed_channels=48,patch_embed_groups=6,patch_embed_neighbours=8,enc_depths=(2, 2, 6, 2),
+                 enc_channels=(96, 192, 384, 512),enc_groups=(12, 24, 48, 64),enc_neighbours=(16, 16, 16, 16),grid_sizes=(0.06, 0.12, 0.24, 0.48),attn_qkv_bias=True,
+                 pe_multiplier=False,pe_bias=True,attn_drop_rate=0.0,drop_path_rate=0,enable_checkpoint=False,unpool_backend="map",):
+            
+        super(PointTransformerV2, self).__init__()
+        self.in_channels = in_channels
+        self.num_classes = num_classes
+        self.num_stages = len(enc_depths)
+        assert self.num_stages == len(enc_channels)
+        assert self.num_stages == len(enc_groups)
+        assert self.num_stages == len(enc_neighbours)
+        assert self.num_stages == len(grid_sizes)
+        
+        self.patch_embed = GVAPatchEmbed(in_channels=in_channels,
+                                         embed_channels=patch_embed_channels,
+                                         groups=patch_embed_groups,
+                                         depth=patch_embed_depth,
+                                         neighbours=patch_embed_neighbours,
+                                         qkv_bias=attn_qkv_bias,
+                                         pe_multiplier=pe_multiplier,
+                                         pe_bias=pe_bias,
+                                         attn_drop_rate=attn_drop_rate,
+                                         enable_checkpoint=enable_checkpoint,
+                                         )
+
+        enc_dp_rates = [x.item() for x in torch.linspace(0, drop_path_rate, sum(enc_depths))]
+        enc_channels = [patch_embed_channels] + list(enc_channels)
+
+        self.enc_stages = nn.ModuleList()
+        for i in range(self.num_stages):
+            enc = Encoder(depth=enc_depths[i],
+                          in_channels=enc_channels[i],
+                          embed_channels=enc_channels[i + 1],
+                          groups=enc_groups[i],
+                          grid_size=grid_sizes[i],
+                          neighbours=enc_neighbours[i],
+                          qkv_bias=attn_qkv_bias,
+                          pe_multiplier=pe_multiplier,
+                          pe_bias=pe_bias,
+                          attn_drop_rate=attn_drop_rate,
+                          drop_path_rate=enc_dp_rates[ sum(enc_depths[:i]) : sum(enc_depths[: i + 1])],
+                          enable_checkpoint=enable_checkpoint,
+                          )
+            
+            self.enc_stages.append(enc)
+        
+        self.seg_head = (nn.Sequential(nn.Linear(enc_channels[-1], enc_channels[-1]),
+                                       PointBatchNorm(enc_channels[-1]),
+                                       nn.ReLU(inplace=True),
+                                       nn.Linear(enc_channels[-1], num_classes),) if num_classes > 0 else nn.Identity()
+                                       )
+
+    def forward(self, coord, feat, offset):
+        offset = offset.int()
+        # a batch of point cloud is a list of coord, feat and offset
+        points = [coord, feat, offset]
+        points = self.patch_embed(points)
+        skips = [[points]]
+        for i in range(self.num_stages):
+            points, cluster = self.enc_stages[i](points)
+            skips[-1].append(cluster)  # record grid cluster of pooling
+            skips.append([points])  # record points info of current stage
+
+        points = skips.pop(-1)[0]  # unpooling points info in the last enc stage
+        
+        coord, feat, offset = points
+        seg_logits = self.seg_head(feat)
+
+        
+        list_offset = offset.detach().cpu().numpy().tolist()
+        list_offset.insert(0, 0)
+
+        ## pooling on features
+        pooled_logit = []
+        for i in range(len(list_offset) - 1):
+            start_idx = list_offset[i]
+            end_idx = list_offset[i + 1]
+            logit_i = seg_logits[start_idx:end_idx]
+            pooled_logit.append(logit_i.mean(dim=0))
+
+        return torch.stack(pooled_logit), points
+
