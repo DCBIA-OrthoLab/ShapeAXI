@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from pytorch3d.ops import knn_points, knn_gather
+from pytorch3d.ops import knn_points, knn_gather, sample_farthest_points
 
 # This file contains the definition of the IcosahedronConv2d, IcosahedronConv1d and IcosahedronLinear classes, which are used to perform convolution and linear operations on icosahedral meshes
 
@@ -511,10 +511,24 @@ class MHA_KNN_V(nn.Module):
         #input shape of x is [BS, V_n, Embed_dim]
         if x_v_fixed is None:
             x_v_fixed = x_v
-            
-        dists = knn_points(x_v_fixed, x_v, K=self.K, return_sorted=self.return_sorted)            
+
+        dists_idx = None
+        K = self.K
+        if isinstance(self.K, tuple):
+            K = self.K[0]
+            K_farthest = self.K[1]
+            dists = knn_points(x_v_fixed, x_v, K=K, return_sorted=self.return_sorted) # The idx is of shape [BS, V_n, K]
+
+            _, selected_indices = sample_farthest_points(x_v, K=K_farthest) # The idx is of shape [BS, K]
+            selected_indices = selected_indices.unsqueeze(1).expand(-1, V_n, -1) # The idx is of shape [BS, V_n, K]
+            dists_idx = torch.cat((dists.idx, selected_indices), dim=2)
+
+            K = K + K_farthest
+        else:            
+            dists = knn_points(x_v_fixed, x_v, K=self.K, return_sorted=self.return_sorted)
+            dists_idx = dists.idx
         # compute the key, the input shape is [BS, V_n, K, Embed_dim], it has the closest K points to the query. i.e, find the closest K points to each point in the point cloud
-        k = knn_gather(x, dists.idx)
+        k = knn_gather(x, dists_idx)
 
         #the value tensor contains the directions towards the closest points. 
         # the intuition here is that based on the query and key embeddings, the model will learn to predict
@@ -530,19 +544,19 @@ class MHA_KNN_V(nn.Module):
             v = k
 
         q = q.contiguous().view(batch_size * V_n, 1, Embed_dim) # Original point with dimension 1 added
-        k = k.contiguous().view(batch_size * V_n, self.K, Embed_dim)
-        v = v.contiguous().view(batch_size * V_n, self.K, Embed_dim)        
+        k = k.contiguous().view(batch_size * V_n, K, Embed_dim)
+        v = v.contiguous().view(batch_size * V_n, K, Embed_dim)        
 
         v, x_w = self.attention(q, k, v)
 
         v = v.contiguous().view(batch_size, V_n, Embed_dim)
-        x_w = x_w.contiguous().view(batch_size, V_n, self.K)
+        x_w = x_w.contiguous().view(batch_size, V_n, K)
         
         # Based on the weights of the attention layer, we compute the new position of the points
         # Shape of x_w is [BS, V_n, K] and k_v (x_v after knn_gather) is [BS, V_n, K, 3]
 
         # x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_add_(1, dists.idx.view(batch_size, -1), x_w.view(batch_size, -1))
-        x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_reduce_(dim=1, index=dists.idx.view(batch_size, -1), src=x_w.view(batch_size, -1), reduce="mean")
+        x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_reduce_(dim=1, index=dists_idx.view(batch_size, -1), src=x_w.view(batch_size, -1), reduce="mean")
         x_w = x_w.unsqueeze(-1)
         
         # The new predicted point is the sum of the input point and the weighted sum of the directions
@@ -719,8 +733,12 @@ class AttentionPooling_V(nn.Module):
         
         self.embed_dim = embed_dim
         self.pooling_factor = pooling_factor
-        self.score_pooling = score_pooling        
-        self.K = K
+        self.score_pooling = score_pooling
+
+        if isinstance(K, tuple):
+            self.K = K[0]
+        else:
+            self.K = K
         
         self.W1 = nn.Linear(embed_dim, hidden_dim)
         self.V = nn.Linear(hidden_dim, 1)
@@ -763,19 +781,24 @@ class AttentionPooling_V(nn.Module):
             x_idx_next = torch.argsort(x_s, descending=True, dim=1)[:,:n_samples]
             x_v_next = knn_gather(x_v, x_idx_next).squeeze(2)
         else:
-            x_v_next, x_idx_next = self.sample_points(x_v, int(x_v.shape[1] * pf))
+            # x_v_next, x_idx_next = self.sample_points(x_v, int(x_v.shape[1] * pf))
+            x_v_next, _ = sample_farthest_points(x_v, K=int(x_v.shape[1] * pf)) # The idx is of shape [BS, K]
 
         # Find the closest points in the next level using the current level sampling, i.e., the output
         # dist.idx will have the indices of the points in the next level but dimension of the current level
         pooling = knn_points(x_v_next, x_v, K=K)
         unpooling = knn_points(x_v, x_v_next, K=K)
 
-        return pooling.idx, unpooling.idx, x_v_next, x_v_fixed
+        pooling_idx = pooling.idx
+        unpooling_idx = unpooling.idx
+
+        
+        return pooling_idx, unpooling_idx, x_v_next, x_v_fixed
+        
     
     def forward(self, x, x_v, x_v_fixed=None):
 
         # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
-
         x_s = self.Sigmoid(self.V(self.Tanh(self.W1(x))))
         
         pooling_idx, unpooling_idx, x_v, x_v_fixed = self.get_pooling_idx(x_s, x_v, pf=self.pooling_factor, K=self.K, x_v_fixed=x_v_fixed)
@@ -787,8 +810,11 @@ class AttentionPooling_V(nn.Module):
 
         x = attention_weights * x
         x = torch.sum(x, dim=2)
+
+        if x_v_fixed is not None:
+            return x, x_v, x_s, pooling_idx, unpooling_idx, x_v_fixed
         
-        return x, x_v, x_s, pooling_idx, unpooling_idx, x_v_fixed
+        return x, x_v, x_s, pooling_idx, unpooling_idx
     
 class AttentionPooling_Idx(nn.Module):
     def __init__(self, embed_dim=128, hidden_dim=64):
