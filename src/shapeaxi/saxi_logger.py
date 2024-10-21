@@ -548,6 +548,223 @@ class SaxiAELoggerNeptune(Callback):
 
         return fig
     
+class SaxiDenoiseUnetLoggerNeptune(Callback):
+    # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
+    def __init__(self, num_surf=8, log_steps=10, num_steps=10):
+        self.log_steps = log_steps
+        self.num_surf = num_surf
+        self.num_steps = num_steps
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
+        # This function is called at the end of each training batch
+        if pl_module.global_step % self.log_steps == 0:
+
+            with torch.no_grad():
+                V, F = batch
+
+                n = min(V.shape[0], self.num_surf)
+
+                V = V[0:n]
+                F = F[0:n]
+
+                X_mesh = pl_module.create_mesh(V, F)
+
+                X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.num_samples)
+                
+                noise_amount = torch.linspace(0, 1, X.shape[0]).to(pl_module.device)
+
+                X_noised = pl_module.corrupt(X, noise_amount)  
+
+                X_hat = pl_module(X_noised)
+                
+                fig = self.plot_pointclouds(X.cpu().numpy(), X_noised.cpu().numpy(), X_hat.cpu().numpy())
+                trainer.logger.experiment["images/surf"].upload(fig)
+
+    def plot_diffusion(self, X):
+        num_surf = len(X)
+        specs_r = [{'type': 'scatter3d'} for _ in range(num_surf)]
+
+        fig = make_subplots(
+            rows=1, cols=num_surf,
+            specs=[specs_r]
+        )
+
+        for idx, x in zip(range(num_surf), X):
+            # First scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x[:,0], y=x[:,1], z=x[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=1, col=idx+1
+            )
+
+        return fig
+
+
+    def plot_pointclouds(self, X, X_noised, X_hat):
+
+        num_surf = len(X)
+        specs_r = [{'type': 'scatter3d'} for _ in range(num_surf)]
+
+        fig = make_subplots(
+            rows=3, cols=num_surf,
+            specs=[specs_r, specs_r, specs_r]
+        )
+
+        for idx, x, x_noised, x_hat in zip(range(num_surf), X, X_noised, X_hat):
+            # First scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x[:,0], y=x[:,1], z=x[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=1, col=idx+1
+            )
+
+            # Second scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x_noised[:,0], y=x_noised[:,1], z=x_noised[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x_noised[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=2, col=idx+1
+            )
+
+            # Third scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x_hat[:,0], y=x_hat[:,1], z=x_hat[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x_hat[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=3, col=idx+1
+            )
+
+        # Update the layout if necessary
+        fig.update_layout(height=900, width=1600, title_text="Side-by-Side 3D Scatter Plots")
+
+        return fig
+
+class SaxiDDPMLoggerNeptune(Callback):
+    # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
+    def __init__(self, num_surf=1, log_steps=10, num_steps=10):
+        self.log_steps = log_steps
+        self.num_surf = num_surf
+        self.num_steps = num_steps
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
+        # This function is called at the end of each training batch
+        if pl_module.global_step % self.log_steps == 0:
+
+            with torch.no_grad():
+                V, F = batch
+
+                # n = min(V.shape[0], self.num_surf)
+
+                # V = V[0:n]
+                # F = F[0:n]
+
+                # X_mesh = pl_module.create_mesh(V, F)
+
+                # X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.num_samples)
+                X = torch.randn((1, pl_module.hparams.num_samples, 3)).to(pl_module.device)
+                X_gen = []
+
+                num_diff_steps = int(pl_module.hparams.num_train_steps/self.num_steps)
+
+                for i, t in enumerate(range(pl_module.hparams.num_train_steps)):
+                    residual = pl_module(X, t)  # Again, note that we pass in our labels y
+
+                    X = pl_module.noise_scheduler.step(residual, t, X).prev_sample
+                    
+                    if i % num_diff_steps == 0:
+                        X_gen.append(X)
+                
+                fig = self.plot_diffusion(torch.cat(X_gen, dim=0).cpu().numpy())
+                # fig = self.plot_pointclouds(X.cpu().numpy(), X_noised.cpu().numpy(), X_hat.cpu().numpy())
+                trainer.logger.experiment["images/surf"].upload(fig)
+
+    def plot_diffusion(self, X):
+        num_surf = len(X)
+        specs_r = [{'type': 'scatter3d'} for _ in range(num_surf)]
+
+        fig = make_subplots(
+            rows=1, cols=num_surf,
+            specs=[specs_r]
+        )
+
+        for idx, x in zip(range(num_surf), X):
+            # First scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x[:,0], y=x[:,1], z=x[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=1, col=idx+1
+            )
+
+        return fig
+
+
+    def plot_pointclouds(self, X, X_noised, X_hat):
+
+        num_surf = len(X)
+        specs_r = [{'type': 'scatter3d'} for _ in range(num_surf)]
+
+        fig = make_subplots(
+            rows=3, cols=num_surf,
+            specs=[specs_r, specs_r, specs_r]
+        )
+
+        for idx, x, x_noised, x_hat in zip(range(num_surf), X, X_noised, X_hat):
+            # First scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x[:,0], y=x[:,1], z=x[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=1, col=idx+1
+            )
+
+            # Second scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x_noised[:,0], y=x_noised[:,1], z=x_noised[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x_noised[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=2, col=idx+1
+            )
+
+            # Third scatter plot
+            fig.add_trace(
+                go.Scatter3d(x=x_hat[:,0], y=x_hat[:,1], z=x_hat[:,2], mode='markers', marker=dict(
+                    size=2,
+                    color=x_hat[:,2],                # set color to an array/list of desired values
+                    colorscale='Viridis',   # choose a colorscale
+                    opacity=0.8
+                )),
+                row=3, col=idx+1
+            )
+
+        # Update the layout if necessary
+        fig.update_layout(height=900, width=1600, title_text="Side-by-Side 3D Scatter Plots")
+
+        return fig
+    
 
 class SaxiClassLoggerNeptune(Callback):
     # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
