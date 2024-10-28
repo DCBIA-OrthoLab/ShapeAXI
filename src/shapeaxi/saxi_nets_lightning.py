@@ -14,6 +14,7 @@ import os
 
 import lightning as L
 from typing import Tuple, Union
+from sklearn.metrics import classification_report
 
 import pandas as pd
 
@@ -2250,18 +2251,24 @@ class SaxiMHAClassification(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        df_out = pd.read_csv(self.hparams.csv_test)
-        df_out['pred'] = y_pred
+        self.save_results_to_csv()
 
-        out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
-        out_dir = self.hparams.out.split('epoch')[0]
-        out_name = os.path.basename(self.hparams.csv_test)
+    def save_results_to_csv(self):
 
-        if not os.path.exists(out_dir):
+        csv_test = self.hparams.csv_test
+        df = pd.read_csv(csv_test)
+        df['pred'] = self.y_pred
+        out_dir = os.path.splitext(self.hparams.out)[0]
+        if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
 
-        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+        df.to_csv(out_filename)
 
+        report = classification_report(self.y_true, self.y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+        df_report.to_csv(report_filename)
 
 
 
@@ -2476,7 +2483,6 @@ class SaxiMHAFBClassification(LightningModule):
         X_mesh = self.create_mesh(V, F, CN)
         X_hat, _, _ = self(X_mesh)
 
-        loss = self.compute_loss(X_hat, Y)
         predictions = torch.argmax(X_hat, dim=1)
         output = [predictions,torch.argmax(Y, dim=1)]
         return output 
@@ -2494,14 +2500,25 @@ class SaxiMHAFBClassification(LightningModule):
         df_out = pd.read_csv(self.hparams.csv_test)
         df_out['pred'] = y_pred
 
-        out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
-        out_dir = self.hparams.out.split('epoch')[0]
-        out_name = os.path.basename(self.hparams.csv_test)
 
-        if not os.path.exists(out_dir):
+        self.save_results_to_csv()
+
+    def save_results_to_csv(self):
+
+        csv_test = self.hparams.csv_test
+        df = pd.read_csv(csv_test)
+        df['pred'] = self.y_pred
+        out_dir = os.path.splitext(self.hparams.out)[0]
+        if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
 
-        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+        df.to_csv(out_filename)
+
+        report = classification_report(self.y_true, self.y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+        df_report.to_csv(report_filename)
 
 
 class SaxiMHAFBClassification_V(LightningModule):
@@ -2739,18 +2756,24 @@ class SaxiMHAFBClassification_V(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        df_out = pd.read_csv(self.hparams.csv_test)
-        df_out['pred'] = y_pred
+        self.save_results_to_csv()
 
-        # out_dir = os.path.join(self.hparams.model.split('epoch')[0], 'test')
-        out_dir = self.hparams.out.split('.ckpt')[0]
-        out_name = os.path.splitext(os.path.basename(self.hparams.csv_test))[0]
+    def save_results_to_csv(self):
 
-        if not os.path.exists(out_dir):
+        csv_test = self.hparams.csv_test
+        df = pd.read_csv(csv_test)
+        df['pred'] = self.y_pred
+        out_dir = os.path.splitext(self.hparams.out)[0]
+        if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
 
-        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+        df.to_csv(out_filename)
 
+        report = classification_report(self.y_true, self.y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+        df_report.to_csv(report_filename)
 
 
 class SaxiD(LightningModule):
@@ -3172,7 +3195,49 @@ class SaxiMHAFBRegression(LightningModule):
 
         x = self.fc(x)
         return x, x_w, X
-    
+
+    def test_step(self, test_batch, batch_idx):
+        V, F, CN, Y = test_batch
+
+        X_mesh = self.create_mesh(V, F, CN)
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat,_ ,_ = self(X_mesh)
+
+        predictions = X_hat[0]
+        output = [predictions,Y]
+
+        return output
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+
+        self.save_results_to_csv()
+
+    def save_results_to_csv(self):
+
+        csv_test = self.hparams.csv_test
+        df = pd.read_csv(csv_test)
+        df['pred'] = self.y_pred
+        out_dir = os.path.splitext(self.hparams.out)[0]
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
+
+        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+        df.to_csv(out_filename)
+
+        report = classification_report(self.y_true, self.y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+        df_report.to_csv(report_filename)
+
 
 
 class SaxiMHAFBRegression_V(LightningModule):
@@ -3195,9 +3260,17 @@ class SaxiMHAFBRegression_V(LightningModule):
                                     num_heads=self.hparams.num_heads,
                                     stages=self.hparams.stages,
                                     dropout=self.hparams.dropout,
-                                    pooling_factor=self.hparams.pooling_factor,
-                                    pooling_hidden_dim=self.hparams.pooling_hidden_dim, 
-                                    score_pooling=False)
+                                    pooling_factor=self.hparams.pooling_factor)
+        
+        # self.encoder = MHAIdxEncoder(input_dim=self.hparams.input_dim, 
+        #                             output_dim=self.hparams.output_dim,
+        #                             K=self.hparams.K,
+        #                             num_heads=self.hparams.num_heads,
+        #                             stages=self.hparams.stages,
+        #                             dropout=self.hparams.dropout,
+        #                             pooling_factor=self.hparams.pooling_factor,
+        #                             pooling_hidden_dim=self.hparams.pooling_hidden_dim, 
+        #                             score_pooling=False)
         
 
         self.attn = SelfAttention(self.hparams.output_dim, self.hparams.hidden_dim)
@@ -3391,18 +3464,24 @@ class SaxiMHAFBRegression_V(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        df_out = pd.read_csv(self.hparams.csv_test)
-        df_out['pred'] = y_pred
+        self.save_results_to_csv()
 
-        out_dir = os.path.join(self.hparams.out.split('epoch')[0], 'test')
-        out_dir = self.hparams.out.split('epoch')[0]
-        out_name = os.splitext(os.path.basename(self.hparams.csv_test))
+    def save_results_to_csv(self):
 
-        if not os.path.exists(out_dir):
+        csv_test = self.hparams.csv_test
+        df = pd.read_csv(csv_test)
+        df['pred'] = self.y_pred
+        out_dir = os.path.splitext(self.hparams.out)[0]
+        if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
 
-        df_out.to_csv(os.path.join(out_dir, out_name + '_predictions.csv'))
+        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+        df.to_csv(out_filename)
 
+        report = classification_report(self.y_true, self.y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+        df_report.to_csv(report_filename)
 
 
 #####################################################################################################################################################################################
@@ -3829,18 +3908,8 @@ class SaxiPointTransformer(LightningModule):
         
         group.add_argument("--lr", type=float, default=1e-4)
         group.add_argument("--out_classes", type=int, default=2)
-
-        # PointTransformerV2 params
         group.add_argument("--in_channels", type=int, default=3)
-        # group.add_argument("--dropout", type=float, default=0.1)
         group.add_argument("--num_classes", type=int, default=4)
-        # group.add_argument('--input_feature', type=str, help='Type of features to get from the octree', default='P')
-        # group.add_argument('--resblock_num', type=int, help='Number of residual blocks', default=1)
-        # group.add_argument('--stages', type=int, help='Number of stages', default=3)
-        # group.add_argument('--depth', type=int, help='Start depth', default=16)
-        # group.add_argument('--radius', type=float, help='Radius of icosphere', default=1.5)
-        # group.add_argument('--subdivision_level', type=int, help='Subdivision level for icosahedron', default=2)
-        # group.add_argument('--image_size', type=int, help='Image resolution size', default=256)
 
         return parent_parser
     
