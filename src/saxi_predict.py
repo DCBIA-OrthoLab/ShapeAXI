@@ -16,7 +16,7 @@ def main(args):
 
     SAXINETS = getattr(saxi_nets_lightning, args.nn)
     model = SAXINETS(**args_d)
-    model = SAXINETS.load_from_checkpoint(args.model)
+    model = SAXINETS.load_from_checkpoint(args.model, strict=False)
     model.eval()
     model.cuda()
 
@@ -35,7 +35,7 @@ def main(args):
                       accelerator="gpu",
                       )
     
-    trainer.test(model, datamodule=data, ckpt_path=args.model)
+    trainer.test(model, datamodule=data)
 
 
 
@@ -47,10 +47,15 @@ if __name__ == '__main__':
 
     input_group = parser.add_argument_group('Input')
     
-    input_group.add_argument('--nn', help='Type of neural network', type=str, required=True)
+    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, 
+                             choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification',
+                                       'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 
+                                       'SaxiMHA', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAClassification', 
+                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V','SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
+
     input_group.add_argument('--data_module', help='Data module type', required=True, type=str, default=None)
     input_group.add_argument('--model', help='Model for prediction', type=str, required=True)
-    input_group.add_argument('--scale_factor', help='Number of workers for loading', type=float, default=1.0)
+    input_group.add_argument('--out', help='Output directory', type=str, default="./")
     
     initial_args, unknownargs = parser.parse_known_args()
 
