@@ -138,8 +138,8 @@ def Saxi_train(args, callbacks):
             log_model_checkpoints=False
         )
         LOGGER = getattr(saxi_logger, args.logger)    
-        # image_logger = LOGGER(log_steps=args.log_every_n_steps)
-        # callbacks.append(image_logger)
+        image_logger = LOGGER(log_steps=args.log_steps)
+        callbacks.append(image_logger)
 
     trainer = Trainer(logger=logger_neptune,max_epochs=args.epochs, log_every_n_steps=args.log_every_n_steps,callbacks=callbacks,devices=torch.cuda.device_count(), accelerator="gpu", strategy=DDPStrategy(find_unused_parameters=False),num_sanity_val_steps=0)
     trainer.fit(model, datamodule=data, ckpt_path=args.model)
@@ -178,8 +178,8 @@ def get_argparse():
     input_group.add_argument('--nn', help='Neural network name', required=True, type=str, 
                              choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification',
                                        'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 
-                                       'SaxiMHA', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 
-                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V'])
+                                       'SaxiMHA', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAClassification', 
+                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V','SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
 
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     
@@ -199,6 +199,7 @@ def get_argparse():
     ##Logger
     logger_group = parser.add_argument_group('Logger')
     logger_group.add_argument('--logger', type=str, help='Logger class name', default=None)
+    logger_group.add_argument('--log_steps', type=int, help='Log steps for the callback (neptune)', default=10)    
     logger_group.add_argument('--log_every_n_steps', type=int, help='Log every n steps', default=10)    
     logger_group.add_argument('--tb_dir', type=str, help='Tensorboard output dir', default=None)
     logger_group.add_argument('--tb_name', type=str, help='Tensorboard experiment name', default="tensorboard")

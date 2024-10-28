@@ -202,22 +202,50 @@ class SaxiDataModule(LightningDataModule):
 
 class SaxiDataModuleVF(LightningDataModule):
     #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
-    def __init__(self, df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column=None , surf_property=None, scalar_column=None, train_transform=None, valid_transform=None, test_transform=None, drop_last=False):
+    def __init__(self, *args, **kwargs):
         super().__init__()
-        self.df_train = df_train
-        self.df_val = df_val   
-        self.df_test = df_test     
-        self.mount_point = mount_point
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.surf_column = surf_column
-        self.class_column = class_column
-        self.scalar_column = scalar_column
-        self.surf_property = surf_property        
-        self.train_transform = train_transform
-        self.valid_transform = valid_transform
-        self.test_transform = test_transform
-        self.drop_last = drop_last
+        self.save_hyperparameters(logger=False)
+
+        # df_train, df_val, df_test, mount_point="./", batch_size=256, num_workers=4, surf_column="surf", class_column=None , surf_property=None, scalar_column=None, drop_last=False, scale_factor=None
+        self.df_train = pd.read_csv(self.hparams.csv_train)
+        self.df_val = pd.read_csv(self.hparams.csv_valid)
+        self.df_test = pd.read_csv(self.hparams.csv_test)
+        self.mount_point = self.hparams.mount_point
+        self.batch_size = self.hparams.batch_size
+        self.num_workers = self.hparams.num_workers
+        self.surf_column = self.hparams.surf_column
+        self.class_column = self.hparams.class_column if hasattr(self.hparams, 'class_column') else None
+        self.scalar_column = self.hparams.scalar_column if hasattr(self.hparams, 'scalar_column') else None
+        self.surf_property = self.hparams.surf_property if hasattr(self.hparams, 'surf_property') else None   
+
+        scale_factor = self.hparams.scale_factor if hasattr(self.hparams, 'scale_factor') else None     
+        self.train_transform = saxi_transforms.TrainTransform(scale_factor=scale_factor)
+        self.valid_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor)
+        self.test_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor)
+        self.drop_last = self.hparams.drop_last
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("SaxiDataModuleVF")
+        
+        group.add_argument('--batch_size', type=int, default=16)
+        group.add_argument('--num_workers', type=int, default=6)
+        group.add_argument('--surf_column', type=str, default=None)
+        group.add_argument('--class_column', type=str, default=None)
+        group.add_argument('--scalar_column', type=str, default=None)
+        group.add_argument('--color_normals', type=int, default=1)
+        group.add_argument('--csv_train', type=str, default=None)
+        group.add_argument('--csv_valid', type=str, default=None)
+        group.add_argument('--csv_test', type=str, default=None)
+        group.add_argument('--mount_point', type=str, default="./")
+        group.add_argument('--train_transform', type=Callable, default=None)
+        group.add_argument('--valid_transform', type=Callable, default=None)
+        group.add_argument('--test_transform', type=Callable, default=None)
+        group.add_argument('--drop_last', type=bool, default=False)
+        group.add_argument('--surf_property', type=str, default=None)
+
+        return parent_parser
 
     def setup(self, stage=None):
         # Assign train/val datasets for use in dataloaders
@@ -511,10 +539,9 @@ class SaxiFreesurferDataset(Dataset):
         vertsR, facesR, vertex_featuresR, face_featuresR, Y = self.getitem_per_hemisphere('R', idx)
         return  vertsL, facesL, vertex_featuresL, face_featuresL, vertsR, facesR, vertex_featuresR, face_featuresR, Y 
     
-    def data_to_tensor(self,path):
+    def data_to_tensor(self, path):
         data = nib.freesurfer.read_morph_data(path)
-        data = data.byteswap().newbyteorder()
-        data = torch.from_numpy(data).float()
+        data = torch.from_numpy(data.astype(float))
         return data
 
     def set_wm_as_texture(self, sphere, wm_path):
