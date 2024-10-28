@@ -2224,11 +2224,9 @@ class SaxiMHAClassification(LightningModule):
         
         self.log("val_loss", loss, sync_dist=True)
 
-    def test_step(self, val_batch, batch_idx):
-
-        print(len(val_batch))
+    def test_step(self, test_batch, batch_idx):
         
-        V, F, CN, Y = val_batch
+        V, F, CN, Y = test_batch
         
         X_mesh = self.create_mesh(V, F)
         X_hat, _ = self(X_mesh)
@@ -2251,24 +2249,7 @@ class SaxiMHAClassification(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        self.save_results_to_csv()
-
-    def save_results_to_csv(self):
-
-        csv_test = self.hparams.csv_test
-        df = pd.read_csv(csv_test)
-        df['pred'] = self.y_pred
-        out_dir = os.path.splitext(self.hparams.out)[0]
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
-        df.to_csv(out_filename)
-
-        report = classification_report(self.y_true, self.y_pred, output_dict=True)
-        df_report = pd.DataFrame(report).transpose()
-        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
-        df_report.to_csv(report_filename)
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
 
 
@@ -2501,24 +2482,8 @@ class SaxiMHAFBClassification(LightningModule):
         df_out['pred'] = y_pred
 
 
-        self.save_results_to_csv()
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
-    def save_results_to_csv(self):
-
-        csv_test = self.hparams.csv_test
-        df = pd.read_csv(csv_test)
-        df['pred'] = self.y_pred
-        out_dir = os.path.splitext(self.hparams.out)[0]
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
-        df.to_csv(out_filename)
-
-        report = classification_report(self.y_true, self.y_pred, output_dict=True)
-        df_report = pd.DataFrame(report).transpose()
-        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
-        df_report.to_csv(report_filename)
 
 
 class SaxiMHAFBClassification_V(LightningModule):
@@ -2756,24 +2721,8 @@ class SaxiMHAFBClassification_V(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        self.save_results_to_csv()
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
-    def save_results_to_csv(self):
-
-        csv_test = self.hparams.csv_test
-        df = pd.read_csv(csv_test)
-        df['pred'] = self.y_pred
-        out_dir = os.path.splitext(self.hparams.out)[0]
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
-        df.to_csv(out_filename)
-
-        report = classification_report(self.y_true, self.y_pred, output_dict=True)
-        df_report = pd.DataFrame(report).transpose()
-        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
-        df_report.to_csv(report_filename)
 
 
 class SaxiD(LightningModule):
@@ -3219,24 +3168,8 @@ class SaxiMHAFBRegression(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        self.save_results_to_csv()
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
-    def save_results_to_csv(self):
-
-        csv_test = self.hparams.csv_test
-        df = pd.read_csv(csv_test)
-        df['pred'] = self.y_pred
-        out_dir = os.path.splitext(self.hparams.out)[0]
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
-        df.to_csv(out_filename)
-
-        report = classification_report(self.y_true, self.y_pred, output_dict=True)
-        df_report = pd.DataFrame(report).transpose()
-        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
-        df_report.to_csv(report_filename)
 
 
 
@@ -3464,24 +3397,7 @@ class SaxiMHAFBRegression_V(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        self.save_results_to_csv()
-
-    def save_results_to_csv(self):
-
-        csv_test = self.hparams.csv_test
-        df = pd.read_csv(csv_test)
-        df['pred'] = self.y_pred
-        out_dir = os.path.splitext(self.hparams.out)[0]
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
-        df.to_csv(out_filename)
-
-        report = classification_report(self.y_true, self.y_pred, output_dict=True)
-        df_report = pd.DataFrame(report).transpose()
-        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
-        df_report.to_csv(report_filename)
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
 
 #####################################################################################################################################################################################
@@ -3879,6 +3795,9 @@ class SaxiOctree(LightningModule):
         print(self.y_true)
         print(classification_report(self.y_true, self.y_pred, target_names=target_names))
 
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+
+
 
 
 
@@ -3991,24 +3910,8 @@ class SaxiPointTransformer(LightningModule):
         print(self.y_true)
         print(classification_report(self.y_true, self.y_pred))
 
-        self.save_results_to_csv(y_true=self.y_true, y_pred=self.y_pred)
+        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
-    def save_results_to_csv(self, y_true, y_pred):
-
-        csv_test = self.hparams.csv_test
-        df = pd.read_csv(csv_test)
-        df['pred'] = y_pred
-        out_dir = os.path.splitext(self.hparams.out)[0]
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
-        df.to_csv(out_filename)
-
-        report = classification_report(self.y_true, self.y_pred, output_dict=True)
-        df_report = pd.DataFrame(report).transpose()
-        report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
-        df_report.to_csv(report_filename)
     
 ## DEPRECATED
 
