@@ -2419,7 +2419,8 @@ class SaxiMHAFBClassification(LightningModule):
         loss = self.compute_loss(X_hat, Y)
         
         self.log("train_loss", loss)
-        self.accuracy(X_hat, torch.argmax(Y, dim=1))
+        # self.accuracy(X_hat, torch.argmax(Y, dim=1))
+        self.accuracy(X_hat, Y)
         self.log("train_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True) 
 
         return loss
@@ -2438,7 +2439,8 @@ class SaxiMHAFBClassification(LightningModule):
         loss = self.compute_loss(X_hat, Y)
         
         self.log("val_loss", loss, sync_dist=True)
-        self.accuracy(X_hat, torch.argmax(Y, dim=1))
+        # self.accuracy(X_hat, torch.argmax(Y, dim=1))
+        self.accuracy(X_hat, Y)
         self.log("val_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True)
 
     def forward(self, X_pc, X_views):
