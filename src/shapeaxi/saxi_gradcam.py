@@ -20,12 +20,90 @@ import vtk
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 import subprocess
 
+from shapeaxi import saxi_nets_lightning
 from shapeaxi import saxi_nets, post_process as psp, utils
 from shapeaxi.saxi_dataset import SaxiDataset, SaxiIcoDataset, SaxiFreesurferDataset
 from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, UnitSurfTransform, RandomRotationTransform, GaussianNoisePointTransform, NormalizePointTransform, CenterTransform
 
 # Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done.
 # Especially identify the parts of the picture which is the most important for the network to make a decision.
+from captum.attr import LayerIntegratedGradients, LayerGradCam,LayerConductance,LayerActivation,InternalInfluence,LayerGradientXActivation,LayerGradCam,LayerDeepLift,LayerDeepLiftShap,LayerGradientShap
+
+def scale_cam_image(cam, target_size=None):
+    ## adapted from https://github.com/jacobgil/pytorch-grad-cam/blob/master/pytorch_grad_cam/utils/image.py#L162
+    result = []
+    for img in cam:
+      if target_size is not None:
+
+        img = cv2.resize(np.float32(img), target_size)
+
+        new_max = np.percentile(img.flatten(),q=99)
+        new_min = np.percentile(img.flatten(),q=1)
+        img = np.clip(img,new_min,new_max)
+
+        img =  2*((img - np.min(img)) / (np.max(img) -np.min(img))) -1 
+
+      result.append(img)
+    result = np.float32(result)
+
+    return result
+
+
+def SaxiMHAFB_Classification_Regression_gradcam(args, df_test, model, device):
+    '''
+    Function called to generate the GradCAM for the classification and regression models using captum
+
+    Args :
+        args : arguments
+        df_test : test dataframe
+        model : model loaded from checkpoint
+        device : device (cuda or cpu)
+    '''
+
+    model = model.to(device)
+    model.eval()
+
+    test_ds = SaxiDataset(df_test, transform=EvalTransform(), **vars(args))
+    test_loader = DataLoader(test_ds, batch_size=1, num_workers=args.num_workers, pin_memory=True)
+
+
+    target_layer = getattr(model.convnet.module, args.target_layer) #_blocks
+    mv_cam = LayerGradCam(model,target_layer[-1],device_ids=[0])
+
+    if not os.path.exists(args.out):
+        os.makedirs(args.out)
+
+    for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
+
+        V = V.cuda(non_blocking=True)
+        F = F.cuda(non_blocking=True)
+        CN = CN.cuda(non_blocking=True)
+
+        X_mesh = model.create_mesh(V, F, CN)
+        X_pc = model.sample_points_from_meshes(X_mesh, model.hparams.sample_levels[0])  ## mhafb
+        # X_pc = model.sample_points_from_meshes(X_mesh, model.hparams.sample_level) ## mhafb_V
+        X_views, PF = model.render(X_mesh.to(device))
+
+
+        surf = test_ds.getSurf(idx)
+        surf_path = test_ds.getSurfPath(idx)
+
+        for class_idx in range(model.hparams.num_classes):
+            args.target_class = class_idx
+            mv_att = mv_cam.attribute(inputs=(X_pc,X_views), target=class_idx,attr_dim_summation=False)
+            # mv_att = multiview.attribute(inputs=(X_pc,X_views, x_v_fixed), target=class_idx,attr_dim_summation=False)
+
+            mv_att = mv_att.sum(dim=1).cpu().detach() ## LayerIntegratedGradients
+
+            mv_att_upscaled = scale_cam_image(mv_att.numpy(), target_size=(224,224))
+            mv_att_upscaled = gradcam_process(args, mv_att_upscaled, F, PF, V,device=device)
+
+            surf.GetPointData().AddArray(mv_att_upscaled)
+            psp.MedianFilter(surf, mv_att_upscaled)
+
+        out_surf_path = os.path.join(args.out,os.path.basename(surf_path))
+        utils.WriteSurf(surf, out_surf_path)
+
 
 
 def gradcam_process(args, grayscale_cam, F, PF, V, device):
@@ -357,7 +435,7 @@ def main(args):
     else:
         df_test = pd.read_parquet(args.csv_test)
 
-    SAXINETS = getattr(saxi_nets, args.nn)
+    SAXINETS = getattr(saxi_nets_lightning, args.nn)
     model = SAXINETS.load_from_checkpoint(args.model)
     print(args.model)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -368,7 +446,9 @@ def main(args):
         "SaxiRingClassification": SaxiClassification_Regression_gradcam,
         "SaxiRing": SaxiRing_gradcam,
         "SaxiMHA": SaxiRing_gradcam,
-        "SaxiIcoClassification": SaxiIcoClassification_gradcam
+        "SaxiIcoClassification": SaxiIcoClassification_gradcam,
+        "SaxiMHAFBClassification":SaxiMHAFB_Classification_Regression_gradcam,
+        "SaxiMHAFBRegression":SaxiMHAFB_Classification_Regression_gradcam,
     }
 
     # Train the model
@@ -419,7 +499,7 @@ def get_argparse():
 if __name__ == '__main__':
     parser = get_argparse()
     initial_args, unknownargs = parser.parse_known_args()
-    model_args = getattr(saxi_nets, initial_args.nn)
+    model_args = getattr(saxi_nets_lightning, initial_args.nn)
     model_args.add_model_specific_args(parser)
     args = parser.parse_args()
     main(args)
