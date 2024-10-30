@@ -171,7 +171,10 @@ def train_test_eval_folds(args, arg_groups, scale_factor, ext):
             for k in train_args:
                 if train_args[k]:
                     command.append('--' + str(k))
-                    command.append(str(train_args[k]))
+                    if isinstance(train_args[k],list):
+                        command.extend(map(str, train_args[k]))
+                    else:
+                        command.append(str(train_args[k]))
             subprocess.run(command)
         print(bcolors.SUCCESS, f"End training for fold {f}", bcolors.ENDC)
 
