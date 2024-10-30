@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 import torch
 torch.set_float32_matmul_precision('high')
 
-from shapeaxi import compute_min_scale, split_train_eval, saxi_eval, saxi_predict, saxi_train, saxi_gradcam, saxi_nets_lightning
+from shapeaxi import compute_min_scale, saxi_predict, split_train_eval, saxi_eval, saxi_train, saxi_gradcam, saxi_nets_lightning
 from shapeaxi.colors import bcolors
 
 def get_last_checkpoint(checkpoint_dir):
@@ -193,18 +193,29 @@ def test_model(args, arg_groups, ext, f):
     test_args = get_argparse_dict(saxi_predict.get_argparse())
     update_args_with_groups(test_args, arg_groups, [args.nn])
     test_args.update({
-        'csv': get_fold_filenames(args, ext, f)[2],
+        'csv_train': get_fold_filenames(args, ext, f)[0],
+        'csv_valid': get_fold_filenames(args, ext, f)[1],
+        'csv_test': get_fold_filenames(args, ext, f)[2],
         'model': get_best_checkpoint(os.path.join(args.out, 'train', f'fold{f}')),
         'surf_column': args.surf_column,
         'class_column': args.class_column,
         'mount_point': args.mount_point,
+        'data_module':args.data_module,
         'nn': args.nn,
         'out': os.path.join(args.out, 'test', f'fold{f}')
     })
-    out_prediction = os.path.join(test_args['out'], os.path.basename(test_args['model']), os.path.basename(test_args['csv']).replace(ext, "_prediction" + ext))
+    out_prediction = os.path.join(test_args['out'], os.path.basename(test_args['model']), os.path.basename(test_args['csv_test']).replace(ext, "_prediction" + ext))
 
     if not os.path.exists(out_prediction):
-        saxi_predict.main(Namespace(**test_args))
+        command = [sys.executable, '-m', 'shapeaxi.saxi_predict']
+        for k in test_args:
+            if test_args[k]:
+                command.append('--' + str(k))
+                if isinstance(test_args[k],list):
+                    command.extend(map(str, test_args[k]))
+                else:
+                    command.append(str(test_args[k]))
+        subprocess.run(command)
     
     return out_prediction
 
@@ -375,6 +386,7 @@ def cml():
     # Arguments used for split the data into the different folds
     scale_group = parser.add_argument_group('Scale')
     scale_group.add_argument('--column_scale_factor', type=str, help='Specify the name if there already is a column with scale factor in the input file', default='surf_scale')
+    scale_group.add_argument('--compute_scale_factor', help='Compute a global scale factor for all shapes in the population.', type=int, default=0)
 
     split_group = parser.add_argument_group('Split')
     split_group.add_argument('--csv', type=str, help='CSV with columns surf,class', default=None)
@@ -396,7 +408,6 @@ def cml():
     train_group.add_argument('--class_column', type=str, help='Class column name', default="class")
     train_group.add_argument('--scale_factor', type=float, help='Scale factor for the shapes', default=1.0)
     train_group.add_argument('--profiler', type=str, help='Profiler', default=None)
-    train_group.add_argument('--compute_scale_factor', help='Compute a global scale factor for all shapes in the population.', type=int, default=0)
     train_group.add_argument('--compute_features', help='Compute features for the shapes in the population.', type=int, default=0)
     train_group.add_argument('--mount_point', type=str, help='Dataset mount directory', default="./")
     train_group.add_argument('--num_workers', type=int, help='Number of workers for loading', default=4)
