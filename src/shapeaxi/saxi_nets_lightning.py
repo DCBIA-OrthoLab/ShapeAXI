@@ -2249,7 +2249,8 @@ class SaxiMHAClassification(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
 
 
@@ -2487,7 +2488,8 @@ class SaxiMHAFBClassification(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
 
 
@@ -2736,7 +2738,8 @@ class SaxiMHAFBClassification_V(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
 
 
@@ -3188,7 +3191,8 @@ class SaxiMHAFBRegression(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
 
 
@@ -3425,7 +3429,8 @@ class SaxiMHAFBRegression_V(LightningModule):
         self.y_pred = y_pred
         self.y_true = y_true
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
 
 #####################################################################################################################################################################################
@@ -3823,7 +3828,8 @@ class SaxiOctree(LightningModule):
         print(self.y_true)
         print(classification_report(self.y_true, self.y_pred, target_names=target_names))
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
 
 
@@ -3938,7 +3944,8 @@ class SaxiPointTransformer(LightningModule):
         print(self.y_true)
         print(classification_report(self.y_true, self.y_pred))
 
-        utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
 
     
 ## DEPRECATED

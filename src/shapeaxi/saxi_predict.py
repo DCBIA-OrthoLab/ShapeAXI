@@ -22,13 +22,12 @@ def main(args):
 
     model.hparams.csv_test = args.csv_test
     # model.hparams.mount_point = args.mount_point
-    model.hparams.out = args.model
+    model.hparams.model = args.model
+    model.hparams.out = args.out
 
     valid_transform = EvalTransform(scale_factor=model.hparams.scale_factor)
     args_d['test_transform'] = valid_transform
 
-    print(f"Saxi predict ")
-    print(args_d)
     data = DATAMODULE(**args_d)
     data.setup()
 

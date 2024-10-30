@@ -1366,18 +1366,18 @@ def pad_verts_faces(batch):
         
             return verts, faces, color_normals
 
-def save_results_to_csv(csv_test, y_pred, y_true, out):
+def save_results_to_csv(csv_test, y_pred, y_true, out_dir):
 
     csv_test = csv_test
     df = pd.read_csv(csv_test)
     df['pred'] = y_pred
 
-    out_dir = os.path.splitext(out)[0]
+    # out_dir = os.path.splitext(out)[0]
     
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
 
-    out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_predictions.csv")
+    out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_prediction.csv")
     df.to_csv(out_filename)
 
     report = classification_report(y_true, y_pred, output_dict=True)
