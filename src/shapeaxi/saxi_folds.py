@@ -10,7 +10,7 @@ import torch.multiprocessing as mp
 import torch
 torch.set_float32_matmul_precision('high')
 
-from shapeaxi import compute_min_scale, split_train_eval, saxi_eval, saxi_predict, saxi_train, saxi_gradcam, saxi_nets
+from shapeaxi import compute_min_scale, split_train_eval, saxi_eval, saxi_predict, saxi_train, saxi_gradcam, saxi_nets_lightning
 from shapeaxi.colors import bcolors
 
 def get_last_checkpoint(checkpoint_dir):
@@ -383,7 +383,10 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification, SaxiRingMT, SaxiMHA, SaxiMHAClassification,SaxiMHAFBClassification, SaxiMHAFBRegression, SaxiOctree, SaxiMHAFBRegression_V, SaxiPointTransformer, SaxiMHAFBClassification_V,SaxiIdxAE, SaxiDenoiseUnet, SaxiDDPMUnet', 
+                             required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification','SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V','SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
+
+    train_group.add_argument('--data_module', help='Data module type', required=True,choices=['SaxiDataModule', 'SaxiDataModuleVF', 'SaxiIcoDataModule', 'SaxiFreesurferDataModule', 'SaxiOctreeDataModule','SaxiPointDataModule',] ,type=str, default=None)
     train_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
@@ -430,7 +433,7 @@ def cml():
     logger_group.add_argument('--num_images', type=int, help='Number of images to log', default=12)
 
     initial_args, unknownargs = parser.parse_known_args()
-    model_args = getattr(saxi_nets, initial_args.nn)
+    model_args = getattr(saxi_nets_lightning, initial_args.nn)
     model_args.add_model_specific_args(parser)
 
     args = parser.parse_args()
