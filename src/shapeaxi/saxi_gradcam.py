@@ -27,7 +27,7 @@ from shapeaxi.saxi_transforms import TrainTransform, EvalTransform, UnitSurfTran
 
 # Loops over the folds to generate a visualization to explain what is happening in the network after the evaluation part of the training is done.
 # Especially identify the parts of the picture which is the most important for the network to make a decision.
-from captum.attr import LayerIntegratedGradients, LayerGradCam,LayerConductance,LayerActivation,InternalInfluence,LayerGradientXActivation,LayerGradCam,LayerDeepLift,LayerDeepLiftShap,LayerGradientShap
+from captum.attr import LayerGradCam
 
 def scale_cam_image(cam, target_size=None):
     ## adapted from https://github.com/jacobgil/pytorch-grad-cam/blob/master/pytorch_grad_cam/utils/image.py#L162
@@ -128,6 +128,7 @@ def gradcam_process(args, grayscale_cam, F, PF, V, device):
 
     faces_pid0 = F[0,:,0].to(torch.int64)
     V_gcam[faces_pid0] = P_faces
+    V_gcam[ V_gcam<0] = 0
     V_gcam = numpy_to_vtk(V_gcam.cpu().numpy())
 
     if not args.target_class is None:
@@ -139,37 +140,21 @@ def gradcam_process(args, grayscale_cam, F, PF, V, device):
 
     return V_gcam
 
-
-def gradcam_save(args, out_dir, V_gcam, surf_path, surf):
+def gradcam_save(args, out_dir, surf_path, surf):
     '''
     Function to save the GradCAM on the surface
 
     Args : 
-        gradcam_path : path to save the GradCAM
-        V_gcam : GradCAM values
+        out_dir : output directory to save the GradCAM
         surf_path : path to the surface
-        surf : surface read by utils.ReadSurf
-        hemisphere : hemisphere (lh or rh)
+        surf : surface read by utils.ReadSurf with added gradcam values 
     '''
 
-    gradcam_path = os.path.join(out_dir, os.path.dirname(surf_path))
-
-    if not os.path.exists(gradcam_path):
-        os.makedirs(gradcam_path)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
     
-    if args.fs_path is not None:
-        surf_path = os.path.join(args.fs_path, surf_path)
-
-    out_surf_path = os.path.join(gradcam_path, os.path.basename(surf_path))
-
-    subprocess.call(["cp", surf_path, out_surf_path])
-
-    surf = utils.ReadSurf(out_surf_path)
-
-    surf.GetPointData().AddArray(V_gcam)
-
-    # Median filtering is applied to smooth the CAM on the surface
-    psp.MedianFilter(surf, V_gcam)
+    out_surf_path = os.path.join(out_dir, os.path.basename(surf_path))
+    print(out_surf_path)
 
     writer = vtk.vtkPolyDataWriter()
     writer.SetFileName(out_surf_path)
@@ -203,13 +188,7 @@ def SaxiClassification_Regression_gradcam(args, df_test, model, device):
     # Construct the CAM object
     cam = GradCAM(model=model, target_layers=target_layers)
 
-    targets = None
-    if not args.target_class is None:
-        targets = [ClassifierOutputTarget(args.target_class)]
-
-    scale_intensity = ScaleIntensityRange(0.0, 1.0, 0, 255)
-
-    out_dir = os.path.join(os.path.dirname(args.csv_test), "grad_cam", str(args.target_class))
+    out_dir = os.path.join(args.out, "grad_cam")
 
     for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
         # The generated CAM is processed and added to the input surface mesh (surf) as a point data array
@@ -218,20 +197,25 @@ def SaxiClassification_Regression_gradcam(args, df_test, model, device):
         CN = CN.cuda(non_blocking=True)
 
         X, PF = model.render(V, F, CN)
-        gcam_np = cam(input_tensor=X, targets=targets)
-
-        Vcam = gradcam_process(args, gcam_np, F, PF, V, device)
 
         surf = test_ds.getSurf(idx)
-        surf.GetPointData().AddArray(V_gcam)
+        surf_path = test_ds.getSurfPath(idx)
 
-        # Median filtering is applied to smooth the CAM on the surface
-        psp.MedianFilter(surf, V_gcam)
+        for class_idx in range(model.hparams.out_classes):
+            args.target_class = class_idx
+            targets = None
+            if not args.target_class is None:
+                targets = [ClassifierOutputTarget(args.target_class)]
 
-        surf_path = os.path.basename(df_test.loc[idx][args.surf_column])
+            gcam_np = cam(input_tensor=X, targets=targets)
+            Vcam = gradcam_process(args, gcam_np, F, PF, V, device)
 
-        gradcam_save(args, out_dir, V_gcam, surf_path, surf)
+            surf.GetPointData().AddArray(Vcam)
 
+            # Median filtering is applied to smooth the CAM on the surface
+            psp.MedianFilter(surf, Vcam)
+
+        gradcam_save(args, out_dir, surf_path, surf)
 
 
 #####################################################################################################################################################################################
@@ -490,7 +474,6 @@ def get_argparse():
     
     ##Output
     output_group = parser.add_argument_group('Output')
-    output_group.add_argument('--fps', type=int, help='Frames per second', default=24)  
     output_group.add_argument('--out', type=str, help='Output directory', default='./grad_cam')
 
     return parser
