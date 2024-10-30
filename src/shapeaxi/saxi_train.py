@@ -151,7 +151,7 @@ def main(args):
         filename='{epoch}-{val_loss:.2f}',
         save_top_k=2,
         monitor='val_loss',
-        save_last=True
+        save_last=False
     )
     
     # Early Stopping
