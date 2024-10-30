@@ -2409,10 +2409,13 @@ class SaxiMHAFBClassification(LightningModule):
     def training_step(self, train_batch, batch_idx):
         V, F, CN, Y = train_batch
 
-        Y = self.soft_class_probabilities(Y)
+        # Y = self.soft_class_probabilities(Y)
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat = self(X_pc, X_views)
         loss = self.compute_loss(X_hat, Y)
         
         self.log("train_loss", loss)
@@ -2425,10 +2428,12 @@ class SaxiMHAFBClassification(LightningModule):
         
         V, F, CN, Y = val_batch
 
-        Y = self.soft_class_probabilities(Y)
+        # Y = self.soft_class_probabilities(Y)
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X_views, X_PF = self.render(X_mesh)
+        X_hat = self(X_pc, X_views)
 
         loss = self.compute_loss(X_hat, Y)
         
@@ -2436,15 +2441,13 @@ class SaxiMHAFBClassification(LightningModule):
         self.accuracy(X_hat, torch.argmax(Y, dim=1))
         self.log("val_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True)
 
-    def forward(self, X_mesh):
-        X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+    def forward(self, X_pc, X_views):
         
-        x, x_w = self.encoder(X)        
+        x, x_w = self.encoder(X_pc)        
         x = self.ff(x)
         x, x_s = self.attn(x, x)        
 
 
-        X_views, X_PF = self.render(X_mesh)
         x_fb = self.convnet(X_views)
         x_fb = self.ff_fb(x_fb)
         x_fb, x_fb_mha_s = self.mha_fb(x_fb, x_fb, x_fb)
@@ -2453,19 +2456,23 @@ class SaxiMHAFBClassification(LightningModule):
         x = torch.cat([x, x_fb], dim=1)
 
         x = self.fc(x)
-        return x, x_w, X
+        return x
 
     def test_step(self, val_batch, batch_idx):
         
         V, F, CN, Y = val_batch
 
-        Y = self.soft_class_probabilities(Y)
+        # Y = self.soft_class_probabilities(Y)
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X_views, X_PF = self.render(X_mesh)
+        X_hat = self(X_pc, X_views)
 
         predictions = torch.argmax(X_hat, dim=1)
-        output = [predictions,torch.argmax(Y, dim=1)]
+        # output = [predictions,torch.argmax(Y, dim=1)]
+        output = [predictions,Y]
+
         return output 
 
     def test_epoch_end(self,input_test):
@@ -2477,10 +2484,6 @@ class SaxiMHAFBClassification(LightningModule):
 
         self.y_pred = y_pred
         self.y_true = y_true
-
-        df_out = pd.read_csv(self.hparams.csv_test)
-        df_out['pred'] = y_pred
-
 
         utils.save_results_to_csv(csv_test = self.hparams.csv_test, y_pred=self.y_pred, y_true=self.y_true, out=self.hparams.out)
 
@@ -2650,7 +2653,11 @@ class SaxiMHAFBClassification_V(LightningModule):
         # Y = self.soft_class_probabilities(Y)
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+        X_views, X_PF = self.render(X_mesh)
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list(), self.hparams.sample_level)
+
+        X_hat = self(X_pc, X_views, x_v_fixed)
         loss = self.compute_loss(X_hat, Y)
         
         self.log("train_loss", loss)
@@ -2667,7 +2674,12 @@ class SaxiMHAFBClassification_V(LightningModule):
         # Y = self.soft_class_probabilities(Y)
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+        X_views, X_PF = self.render(X_mesh)
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list(), self.hparams.sample_level)
+
+        X_hat = self(X_pc, X_views, x_v_fixed)
 
         loss = self.compute_loss(X_hat, Y)
         
@@ -2677,11 +2689,8 @@ class SaxiMHAFBClassification_V(LightningModule):
 
         self.log("val_acc", self.accuracy, batch_size=V.shape[0], sync_dist=True)
 
-    # def forward(self, X_pc, X_views, x_v_fixed):
-    def forward(self, X_mesh):
-        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
-        X_views, X_PF = self.render(X_mesh)
-        x_v_fixed = self.sample_uniform(X_mesh.verts_list(), self.hparams.sample_level)
+    def forward(self, X_pc, X_views, x_v_fixed):
+    # def forward(self, X_mesh):
         
         x, x_v, unpooling_idxs = self.encoder(X_pc, X_pc, x_v_fixed)
         x, x_s = self.attn(x, x)
@@ -2693,7 +2702,7 @@ class SaxiMHAFBClassification_V(LightningModule):
         x = torch.cat([x, x_fb], dim=1)
 
         x = self.fc(x)
-        return x, x_s, X_pc
+        # return x, x_s, X_pc
         return x
 
     def test_step(self, val_batch, batch_idx):
@@ -2703,11 +2712,15 @@ class SaxiMHAFBClassification_V(LightningModule):
         # Y = self.soft_class_probabilities(Y)
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+        X_views, X_PF = self.render(X_mesh)
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list(), self.hparams.sample_level)
+
+        X_hat = self(X_pc, X_views, x_v_fixed)
 
         loss = self.compute_loss(X_hat, Y)
         predictions = torch.argmax(X_hat, dim=1)
-
+        # output = [predictions,torch.argmax(Y, dim=1)]
         output = [predictions, Y]
         return output 
 
@@ -3108,7 +3121,10 @@ class SaxiMHAFBRegression(LightningModule):
         V, F, CN, Y = train_batch
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat= self(X_pc, X_views)
         loss = self.compute_loss(X_hat, Y)
         
         self.log("train_loss", loss)
@@ -3121,20 +3137,21 @@ class SaxiMHAFBRegression(LightningModule):
         V, F, CN, Y = val_batch
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat= self(X_pc, X_views)
 
         loss = self.compute_loss(X_hat, Y)
         
         self.log("val_loss", loss, sync_dist=True)
 
-    def forward(self, X_mesh):
-        X = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+    def forward(self, X_pc, X_views):
         
-        x, x_w = self.encoder(X)        
+        x, x_w = self.encoder(X_pc)        
         x = self.ff(x)
         x, x_s = self.attn(x, x)
 
-        X_views, X_PF = self.render(X_mesh)
         x_fb = self.convnet(X_views)
         x_fb = self.ff_fb(x_fb)
         x_fb, x_fb_mha_s = self.mha_fb(x_fb, x_fb, x_fb)
@@ -3143,15 +3160,16 @@ class SaxiMHAFBRegression(LightningModule):
         x = torch.cat([x, x_fb], dim=1)
 
         x = self.fc(x)
-        return x, x_w, X
+        return x
 
     def test_step(self, test_batch, batch_idx):
         V, F, CN, Y = test_batch
 
         X_mesh = self.create_mesh(V, F, CN)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
         X_views, X_PF = self.render(X_mesh)
 
-        X_hat,_ ,_ = self(X_mesh)
+        X_hat= self(X_pc, X_views)
 
         predictions = X_hat[0]
         output = [predictions,Y]
@@ -3337,7 +3355,12 @@ class SaxiMHAFBRegression_V(LightningModule):
         V, F, CN, Y = train_batch
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list() ,self.hparams.sample_level)
+
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat= self(X_pc, X_views, x_v_fixed)
         loss = self.compute_loss(X_hat, Y)
         
         self.log("train_loss", loss)
@@ -3350,21 +3373,21 @@ class SaxiMHAFBRegression_V(LightningModule):
         V, F, CN, Y = val_batch
         
         X_mesh = self.create_mesh(V, F, CN)
-        X_hat, _, _ = self(X_mesh)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list() ,self.hparams.sample_level)
+
+        X_views, X_PF = self.render(X_mesh)
+
+        X_hat= self(X_pc, X_views, x_v_fixed)
 
         loss = self.compute_loss(X_hat, Y)
         
         self.log("val_loss", loss, sync_dist=True)
 
-    def forward(self, X_mesh):
-        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
+    def forward(self, X_pc, X_views, x_v_fixed):
         
-        x_v_fixed = self.sample_uniform(X_mesh.verts_list() ,self.hparams.sample_level)
-        
-        x, x_v, unpooling_idxs = self.encoder(X_pc, X_pc, x_v_fixed)
         x, x_s = self.attn(x, x)
 
-        X_views, X_PF = self.render(X_mesh)
         x_fb = self.convnet(X_views)
         x_fb, x_fb_mha_s = self.mha_fb(x_fb, x_fb, x_fb)
         x_fb, x_fb_s = self.attn_fb(x_fb, x_fb)
@@ -3372,15 +3395,18 @@ class SaxiMHAFBRegression_V(LightningModule):
         x = torch.cat([x, x_fb], dim=1)
 
         x = self.fc(x)
-        return x, x_s, X_pc
+        return x
 
     def test_step(self, test_batch, batch_idx):
         V, F, CN, Y = test_batch
 
         X_mesh = self.create_mesh(V, F, CN)
+        X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_levels[0])
+        x_v_fixed = self.sample_uniform(X_mesh.verts_list() ,self.hparams.sample_level)
+
         X_views, X_PF = self.render(X_mesh)
 
-        X_hat,_ ,_ = self(X_mesh)
+        X_hat= self(X_pc, X_views, x_v_fixed)
 
         predictions = X_hat[0]
         output = [predictions,Y]
