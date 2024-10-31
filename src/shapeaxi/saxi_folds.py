@@ -308,16 +308,17 @@ def explainability_analysis(args, arg_groups, ext):
             'model': get_best_checkpoint(os.path.join(args.out, 'train', f'fold{f}')),
             'target_layer': args.target_layer,
             'mount_point': args.mount_point,
-            'fps': args.fps,
         })
-
-        if args.nn in ["SaxiClassification", "SaxiRegression", "SaxiRingClassification"]:
-            gradcam_args['target_class'] = None if args.nn != "SaxiClassification" else pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique()
-        elif args.nn == "SaxiRing":
-            gradcam_args.update({
-                'target_class': 1.0,
-                'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))
-            })
+        if args.nn in ["SaxiMHAFBClassification", "SaxiMHAFBRegression"]:
+            gradcam_args.update({'target_layer': '_blocks'})
+        # if args.nn in ["SaxiClassification", "SaxiRegression", "SaxiRingClassification"]:
+        #     gradcam_args['target_class'] = None if args.nn != "SaxiClassification" else pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique()
+        # elif args.nn == "SaxiRing":
+        #     gradcam_args.update({
+        #         'target_class': 1.0,
+        #         'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))
+        #     })
+        gradcam_args.update({'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']), 'gradcam')})
 
         saxi_gradcam.main(Namespace(**gradcam_args))
         print(bcolors.SUCCESS, f"End explainability for fold {f}", bcolors.ENDC)
@@ -340,18 +341,29 @@ def evaluate_best_model(args, ext, arg_groups, best_model_fold, best_eval_metric
     test_args = get_argparse_dict(saxi_predict.get_argparse())
     update_args_with_groups(test_args, arg_groups, [args.nn])
     test_args.update({
-        'csv': csv_test,
+        'csv_train': csv_test,
+        'csv_valid': csv_test,
+        'csv_test': csv_test,
         'model': best_model_path,
         'surf_column': args.surf_column,
         'class_column': args.class_column,
         'mount_point': args.mount_point,
-        'nn': args.nn,
-        'out': os.path.join(args.out, f'best_test_fold{best_model_fold}')
+        'data_module':args.data_module,
+        'nn': args.nn,        'out': os.path.join(args.out, f'best_test_fold{best_model_fold}')
     })
     out_prediction = os.path.join(test_args['out'], os.path.basename(best_model_path), os.path.basename(csv_test).replace(ext, "_prediction" + ext))
 
     if not os.path.exists(out_prediction):
-        saxi_predict.main(Namespace(**test_args))
+        command = [sys.executable, '-m', 'shapeaxi.saxi_predict']
+        for k in test_args:
+            if test_args[k]:
+                command.append('--' + str(k))
+                if isinstance(test_args[k],list):
+                    command.extend(map(str, test_args[k]))
+                else:
+                    command.append(str(test_args[k]))
+        subprocess.run(command)
+
     print(bcolors.SUCCESS, "End testing of the best model", bcolors.ENDC)
 
     print(bcolors.INFO, "Start evaluation of the best model", bcolors.ENDC)
