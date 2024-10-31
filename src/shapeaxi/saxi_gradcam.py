@@ -70,8 +70,9 @@ def SaxiMHAFB_Classification_Regression_gradcam(args, df_test, model, device):
     target_layer = getattr(model.convnet.module, args.target_layer) #_blocks
     mv_cam = LayerGradCam(model,target_layer[-1],device_ids=[0])
 
-    if not os.path.exists(args.out):
-        os.makedirs(args.out)
+    out_dir = os.path.join(args.out, 'gradcam')
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
 
     for idx, (V, F, CN, L) in tqdm(enumerate(test_loader), total=len(test_loader)):
 
@@ -101,7 +102,7 @@ def SaxiMHAFB_Classification_Regression_gradcam(args, df_test, model, device):
             surf.GetPointData().AddArray(mv_att_upscaled)
             psp.MedianFilter(surf, mv_att_upscaled)
 
-        out_surf_path = os.path.join(args.out,os.path.basename(surf_path))
+        out_surf_path = os.path.join(out_dir,os.path.basename(surf_path))
         utils.WriteSurf(surf, out_surf_path)
 
 
