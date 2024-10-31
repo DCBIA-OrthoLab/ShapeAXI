@@ -1,3 +1,4 @@
+import pdb
 import math
 import numpy as np 
 import torch
@@ -202,6 +203,39 @@ class SaxiClassification(LightningModule):
         self.accuracy(x, Y)
         self.log("val_acc", self.accuracy, batch_size=batch_size, sync_dist=True)
 
+    def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
+
+        V, F, CN, Y = test_batch
+        V = V.to(self.device, non_blocking=True)
+        F = F.to(self.device, non_blocking=True)        
+        CN = CN.to(self.device, non_blocking=True)
+        X, PF = self.render(V, F, CN)
+        x, _ = self(X)
+        loss = self.loss(x, Y)
+
+        self.log('test_loss', loss, batch_size=self.hparams.batch_size)
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
+
+        return output
+
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        probs = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
+
 
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #
@@ -357,6 +391,36 @@ class SaxiRegression(LightningModule):
         loss = self.loss(x, Y)
         batch_size = V.shape[0]
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
+
+    def test_step(self,test_batch, batch_idx):
+        # test step
+        V, F, CN, Y = test_batch
+        V = V.to(self.device, non_blocking=True)
+        F = F.to(self.device, non_blocking=True)        
+        CN = CN.to(self.device, non_blocking=True)
+        X, PF = self.render(V, F, CN)
+        x = self(X)
+        loss = self.loss(x, Y)
+        batch_size = V.shape[0]
+        self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
+        predictions = x[0]
+        output = [predictions,Y]
+
+        return output
+    
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+
+        self.y_pred = y_pred
+        self.y_true = y_true
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
+
 
 
 #####################################################################################################################################################################################
@@ -770,13 +834,16 @@ class SaxiIcoClassification(LightningModule):
 
 
     def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
+
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, demographic, Y = test_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR, demographic))
         Y = Y.squeeze(dim=1)     
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
 
         return output
 
@@ -784,16 +851,16 @@ class SaxiIcoClassification(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
-        target_names = ['No ASD','ASD']
-        self.y_pred =y_pred
-        self.y_true =y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
     def GetView(self,meshes,index):
@@ -1018,12 +1085,14 @@ class SaxiIcoClassification_fs(LightningModule):
 
 
     def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
 
         return output
 
@@ -1031,17 +1100,18 @@ class SaxiIcoClassification_fs(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
+            probs.append(ele[2])
         # target_names = ['No ASD','ASD']
         target_names = ['No QC','QC']
-        self.y_pred = y_pred
-        self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
     def GetView(self,meshes,index):
@@ -1539,29 +1609,30 @@ class SaxiMHA(LightningModule):
 
 
     def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
 
         return output
-
 
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
-        target_names = ['No QC','QC']
-        self.y_pred = y_pred
-        self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
     def GetView(self,meshes,index):
@@ -1794,12 +1865,14 @@ class SaxiRing_QC(LightningModule):
 
 
     def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
 
         return output
 
@@ -1807,16 +1880,16 @@ class SaxiRing_QC(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
-        target_names = ['No QC','QC']
-        self.y_pred = y_pred
-        self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
     def GetView(self,meshes,index):
@@ -2230,6 +2303,7 @@ class SaxiMHAClassification(LightningModule):
         
         X_mesh = self.create_mesh(V, F)
         X_hat, _ = self(X_mesh)
+        softmax = nn.Softmax(dim=1)
 
         loss = self.compute_loss(X_mesh, X_hat)
         
@@ -2242,15 +2316,16 @@ class SaxiMHAClassification(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
+            probs.append(ele[2])
 
-        self.y_pred = y_pred
-        self.y_true = y_true
+        probs = torch.cat(probs).detach().cpu().numpy()
 
         out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
-        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
 
@@ -2464,6 +2539,7 @@ class SaxiMHAFBClassification(LightningModule):
     def test_step(self, val_batch, batch_idx):
         
         V, F, CN, Y = val_batch
+        softmax = nn.Softmax(dim=1)
 
         # Y = self.soft_class_probabilities(Y)
         
@@ -2474,22 +2550,24 @@ class SaxiMHAFBClassification(LightningModule):
 
         predictions = torch.argmax(X_hat, dim=1)
         # output = [predictions,torch.argmax(Y, dim=1)]
-        output = [predictions,Y]
+        prob = softmax(X_hat).detach()
+        output = [predictions,Y, prob]
 
         return output 
 
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
+            probs.append(ele[2])
 
-        self.y_pred = y_pred
-        self.y_true = y_true
+        probs = torch.cat(probs).detach().cpu().numpy()
 
         out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
-        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
 
@@ -2714,6 +2792,7 @@ class SaxiMHAFBClassification_V(LightningModule):
         V, F, CN, Y = val_batch
 
         # Y = self.soft_class_probabilities(Y)
+        softmax = nn.Softmax(dim=1)
         
         X_mesh = self.create_mesh(V, F, CN)
         X_pc = self.sample_points_from_meshes(X_mesh, self.hparams.sample_level)
@@ -2725,15 +2804,18 @@ class SaxiMHAFBClassification_V(LightningModule):
         loss = self.compute_loss(X_hat, Y)
         predictions = torch.argmax(X_hat, dim=1)
         # output = [predictions,torch.argmax(Y, dim=1)]
-        output = [predictions, Y]
+        prob = softmax(X_hat).detach()
+        output = [predictions,Y, prob]
         return output 
 
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
+            probs += ele[2].to_list()
 
         self.y_pred = y_pred
         self.y_true = y_true
@@ -2995,6 +3077,39 @@ class SaxiMHAClassificationSingle(LightningModule):
 
         return x, x_w
     
+    def test_step(self, test_batch, batch_idx):
+        softmax = nn.Softmax(dim=1)
+   
+        V, F, CN, Y = test_batch
+        
+        X_mesh = self.create_mesh(V, F)
+        X_hat, _ = self(X_mesh)
+
+        loss = self.compute_loss(X_hat, Y)
+        
+        batch_size = V.shape[0]
+        self.log("test_loss", loss, sync_dist=True, batch_size=batch_size)
+        
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        prob = softmax(X_hat).detach()
+        output = [predictions,Y, prob]
+
+        return output
+
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        probs = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 class SaxiMHAFBRegression(LightningModule):
     def __init__(self, **kwargs):
@@ -3679,24 +3794,30 @@ class SaxiRingMT(LightningModule):
         T2R = test_batch['T2R']
         T3R = test_batch['T3R']
         Y = test_batch['Y']
+        softmax = nn.Softmax(dim=1)
         
         x = self((T1L, T2L, T3L, T1R, T2R, T3R))
         loss = self.loss_test(x, Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions, Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
         return output
 
 
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
-        target_names = ['No QC','QC']
-        self.y_pred = y_pred
-        self.y_true = y_true
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
     def GetView(self,meshes,index):
@@ -3804,12 +3925,16 @@ class SaxiOctree(LightningModule):
 
 
     def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
+
         OL, OR, Y = test_batch
         x = self((OL, OR, Y))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
+
 
         return output
 
@@ -3817,19 +3942,16 @@ class SaxiOctree(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
-        target_names = ['No QC','QC']
-        self.y_pred = y_pred
-        self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
 
         out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
-        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 
 
@@ -3921,11 +4043,15 @@ class SaxiPointTransformer(LightningModule):
         loss = self.loss_train(logit, Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size,sync_dist=True)
         predictions = torch.argmax(logit, dim=1)
+        softmax = nn.Softmax(dim=1)
+
 
         self.train_accuracy(predictions, Y)
         self.log("test_acc", self.train_accuracy, batch_size=self.hparams.batch_size)           
 
-        output = [predictions,Y]
+        prob = softmax(logit).detach()
+        output = [predictions,Y, prob]
+
 
         return output
 
@@ -3933,19 +4059,16 @@ class SaxiPointTransformer(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
+            probs.append(ele[2])
 
-        self.y_pred = y_pred
-        self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred))
+        probs = torch.cat(probs).detach().cpu().numpy()
 
         out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
-        utils.save_results_to_csv(self.hparams.csv_test, self.y_pred, self.y_true, out)
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
     
 ## DEPRECATED
@@ -4161,12 +4284,14 @@ class SaxiRing(LightningModule):
 
 
     def test_step(self,test_batch,batch_idx):
+        softmax = nn.Softmax(dim=1)
         VL, FL, VFL, FFL, VR, FR, VFR, FFR, Y = test_batch
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
         predictions = torch.argmax(x, dim=1, keepdim=True)
-        output = [predictions,Y]
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
 
         return output
 
@@ -4174,17 +4299,16 @@ class SaxiRing(LightningModule):
     def test_epoch_end(self,input_test):
         y_pred = []
         y_true = []
+        probs = []
         for ele in input_test:
             y_pred += ele[0].tolist()
             y_true += ele[1].tolist()
-        target_names = ['No QC','QC']
-        self.y_pred = y_pred
-        self.y_true = y_true
-        #Classification report
-        print(self.y_pred)
-        print(self.y_true)
-        print(classification_report(self.y_true, self.y_pred, target_names=target_names))
+            probs.append(ele[2])
 
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
     def GetView(self,meshes,index):
         phong_renderer = self.hparams.phong_renderer.to(self.device)
@@ -4408,6 +4532,37 @@ class SaxiRingClassification(LightningModule):
         self.accuracy(x, Y)
         self.log("val_acc", self.accuracy, batch_size=batch_size, sync_dist=True)
 
+    def test_step(self, test_batch, batch_idx):
+        # test step
+        softmax = nn.Softmax(dim=1)
+        V, F, CN, Y = test_batch
+        V = V.to(self.device, non_blocking=True)
+        F = F.to(self.device, non_blocking=True)        
+        CN = CN.to(self.device, non_blocking=True)
+        X, PF = self.render(V, F, CN)
+        x, _ = self(X)
+        loss = self.loss(x, Y)
+        batch_size = V.shape[0]
+        self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
+        predictions = torch.argmax(x, dim=1, keepdim=True)
+        prob = softmax(x).detach()
+        output = [predictions,Y, prob]
+
+        return output
+
+    def test_epoch_end(self,input_test):
+        y_pred = []
+        y_true = []
+        probs = []
+        for ele in input_test:
+            y_pred += ele[0].tolist()
+            y_true += ele[1].tolist()
+            probs.append(ele[2])
+
+        probs = torch.cat(probs).detach().cpu().numpy()
+
+        out = os.path.join(self.hparams.out, os.path.basename(self.hparams.model))
+        utils.save_results_to_csv(self.hparams.csv_test, y_pred, y_true, out, probs=probs)
 
 class SaxiDenoiseUnet(LightningModule):
     def __init__(self, **kwargs):
