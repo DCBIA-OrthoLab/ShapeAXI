@@ -13,7 +13,7 @@ import monai
 from monai.transforms import (
     ToTensor
 )
-
+import pickle
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.metrics import classification_report
 
@@ -1366,21 +1366,24 @@ def pad_verts_faces(batch):
         
             return verts, faces, color_normals
 
-def save_results_to_csv(csv_test, y_pred, y_true, out_dir):
+def save_results_to_csv(csv_test, y_pred, y_true, out_dir, probs=None):
 
-    csv_test = csv_test
     df = pd.read_csv(csv_test)
     df['pred'] = y_pred
+    fname = os.path.basename(csv_test)
+    ext = os.path.splitext(csv_test)[1]
 
-    # out_dir = os.path.splitext(out)[0]
-    
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
 
-    out_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_prediction.csv")
+    if probs is not None:
+        out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
+        pickle.dump(probs, open(out_probs, 'wb'))
+    
+    out_filename = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
     df.to_csv(out_filename)
 
     report = classification_report(y_true, y_pred, output_dict=True)
     df_report = pd.DataFrame(report).transpose()
-    report_filename = os.path.join(out_dir, os.path.splitext(os.path.basename(csv_test))[0]+ "_classification_report.csv")
+    report_filename = os.path.join(out_dir, fname.replace(ext, "_classification_report.csv"))
     df_report.to_csv(report_filename)
