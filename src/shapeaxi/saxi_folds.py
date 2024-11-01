@@ -513,12 +513,15 @@ def main(args, arg_groups):
     # Train and evaluate the model for each fold
     best_eval_metric, best_model_fold = train_test_eval_folds(args, arg_groups, scale_factor, ext)
     
-    # Aggregate the predictions
-    if args.nn in ["SaxiClassification", "SaxiRegression"]:
-        aggregate_predictions(args, ext)
+    #  Aggregate the predictions
+    aggregate_predictions(args, ext)
     
     # Compute the gradcam
-    explainability_analysis(args, arg_groups, ext)
+    try:
+        explainability_analysis(args, arg_groups, ext)
+    except ValueError as e:
+        if "Unknown neural network name" in str(e):
+            print(bcolors.WARNING, f"Warning: Explainability not defined for network {args.nn} - Skipping.",bcolors.ENDC)
 
     # Evaluate the best model
     evaluate_best_model(args, ext, arg_groups, best_model_fold, best_eval_metric)
