@@ -1376,14 +1376,14 @@ def save_results_to_csv(csv_test, y_pred, y_true, out_dir, probs=None):
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
 
+    out_filename = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
+    df.to_csv(out_filename)
+
     if probs is not None:
         out_probs = os.path.join(out_dir, fname.replace(ext, "_probs.pickle"))
         pickle.dump(probs, open(out_probs, 'wb'))
     
-    out_filename = os.path.join(out_dir, fname.replace(ext, "_prediction.csv"))
-    df.to_csv(out_filename)
-
-    report = classification_report(y_true, y_pred, output_dict=True)
-    df_report = pd.DataFrame(report).transpose()
-    report_filename = os.path.join(out_dir, fname.replace(ext, "_classification_report.csv"))
-    df_report.to_csv(report_filename)
+        report = classification_report(y_true, y_pred, output_dict=True)
+        df_report = pd.DataFrame(report).transpose()
+        report_filename = os.path.join(out_dir, fname.replace(ext, "_classification_report.csv"))
+        df_report.to_csv(report_filename)
