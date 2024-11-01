@@ -157,7 +157,10 @@ def create_and_split_folds(args, arg_groups, ext):
 
 
 def train_test_eval_folds(args, arg_groups, scale_factor, ext):
-    best_eval_metric = 0.0
+    if 'Regression' in args.nn:
+        best_eval_metric = 1e5
+    else:
+        best_eval_metric = 0.0
     best_model_fold = ""
     for f in range(args.folds):
         print(bcolors.INFO, f"Start training for fold {f}", bcolors.ENDC)
@@ -232,11 +235,17 @@ def evaluation_model(args, f, best_eval_metric, best_model_fold, out_prediction,
         'eval_metric': args.eval_metric,
         'mount_point': args.mount_point
     })
-    current_weighted_eval_metric = saxi_eval.main(Namespace(**eval_args))
+    current_weighted_eval_metric, comparaison_type = saxi_eval.main(Namespace(**eval_args))
 
-    if current_weighted_eval_metric > best_eval_metric:
-        best_eval_metric = current_weighted_eval_metric
-        best_model_fold = f'{f}'
+    if comparaison_type == 'min':
+        if current_weighted_eval_metric < best_eval_metric:
+            best_eval_metric = current_weighted_eval_metric
+            best_model_fold = f'{f}'
+
+    else:
+        if current_weighted_eval_metric > best_eval_metric:
+            best_eval_metric = current_weighted_eval_metric
+            best_model_fold = f'{f}'
     
     with open(eval_result_path, 'w') as f_out:
         f_out.write(str(current_weighted_eval_metric))
@@ -258,7 +267,7 @@ def aggregate_predictions(args, ext):
     for f in range(args.folds):
         out_prediction_fn = aggregate(ext, args, f, out_prediction_agg)
         out_prediction_agg.append(pd.read_csv(out_prediction_fn))
-        if args.nn == "SaxiClassification":
+        if 'Regression' not in args.nn :
             probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
             out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
 
@@ -266,7 +275,7 @@ def aggregate_predictions(args, ext):
     output_agg_path = os.path.join(args.out, 'test', os.path.basename(args.csv.replace('.csv', '_train.csv')).replace(ext, "_aggregate_prediction" + ext))
     out_prediction_agg.to_csv(output_agg_path, index=False)
 
-    if args.nn == "SaxiClassification":
+    if 'Regression' not in args.nn :
         pickle.dump(np.concatenate(out_prediction_probs_agg), open(output_agg_path.replace("_prediction.csv", "_probs.pickle"), 'wb'))
 
     eval_aggregate_predictions(args, output_agg_path)
@@ -442,7 +451,7 @@ def cml():
     eval_group.add_argument('--csv_true_column', type=str, help='Which column to do the stats on', default="class")
     eval_group.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
     eval_group.add_argument('--csv_prediction_column', type=str, help='csv true class', default="pred")
-    eval_group.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1 or AUC', default='F1', choices=['F1', 'AUC'])
+    eval_group.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1, AUC, MAE (Mean Absolute Error), RMSE (Root Mean Squared Error) or ME (Mean Error)', default='F1', choices=['F1', 'AUC','MAE', 'RMSE', 'ME'])
 
     # Arguments used for explainability
     explain_group = parser.add_argument_group('Explainability group')

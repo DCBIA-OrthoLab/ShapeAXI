@@ -58,7 +58,15 @@ def plot_confusion_matrix(cm, classes,normalize=False,title='Confusion matrix',c
     return cm
 
 
-def choose_score(args,report):
+def choose_regression_score(args, errors_df):
+    if args.eval_metric in ['MAE', 'RMSE', 'ME']:
+        error = errors_df.loc[errors_df['Metric']==args.eval_metric]['Value'].iloc[0]
+        print(bcolors.PROC, f"{args.eval_metric}: {error}", bcolors.ENDC)
+        return error
+    else:
+      sys.exit("The value of score is not MAE, RMSE or ME. You must specify MAE, RMSE or ME.")
+
+def choose_classification_score(args,report):
     if args.eval_metric == 'F1':
       # Calculate F1 score
       weighted_f1_score = report["weighted avg"]["f1-score"]
@@ -178,8 +186,8 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
         print(json.dumps(report, indent=4))
         print(f"Saved classification report to {report_filename}")
 
-        score = choose_score(args, report)
-        return score
+        score = choose_classification_score(args, report)
+        return score, 'max'
 
 
 #####################################################################################################################################################################################
@@ -286,9 +294,9 @@ def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
 
 
     # Extraction of the score (AUC or F1)
-    score = choose_score(args,report)
+    score = choose_classification_score(args,report)
 
-    return score
+    return score, 'max'
 
 
 #####################################################################################################################################################################################
@@ -338,7 +346,9 @@ def SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
     errors_filename = os.path.splitext(path_to_csv)[0] + "_errors.csv"
     errors_df.to_csv(errors_filename, index=False)
 
-    print(errors_df)
+    score = choose_regression_score(args, errors_df)
+
+    return score, 'min'
 
 
 def main(args):
@@ -366,9 +376,9 @@ def main(args):
         "SaxiOctree":SaxiClassification_eval,
         'SaxiMHAClassification': SaxiClassification_eval,
         'SaxiMHAFBClassification': SaxiClassification_eval,
-        'SaxiMHAFBRegression': SaxiClassification_eval,
+        'SaxiMHAFBRegression': SaxiRegression_eval,
         'SaxiOctree': SaxiClassification_eval,
-        'SaxiMHAFBRegression_V': SaxiClassification_eval,
+        'SaxiMHAFBRegression_V': SaxiRegression_eval,
         'SaxiPointTransformer': SaxiClassification_eval,
         'SaxiMHAFBClassification_V': SaxiClassification_eval,
     }
@@ -397,7 +407,7 @@ def get_argparse():
   parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')
   parser.add_argument('--pred_id', type=str, help='Name of array in point data for the predicted labels', default='PredictedID')
-  parser.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1 or AUC', default='F1', choices=['F1', 'AUC'])
+  parser.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1, AUC, MAE (Mean Absolute Error), RMSE (Root Mean Squared Error) or ME (Mean Error)', default='F1', choices=['F1', 'AUC','MAE', 'RMSE', 'ME'])
   parser.add_argument('--mount_point', type=str, help='Mount point for the data', default='./')
 
   return parser
