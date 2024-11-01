@@ -215,7 +215,7 @@ class SaxiClassification(LightningModule):
         loss = self.loss(x, Y)
 
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -266,7 +266,7 @@ class SaxiRegression(LightningModule):
 
         self.F = TimeDistributed(self.convnet)
         self.V = nn.Linear(self.hparams.hidden_dim, self.hparams.hidden_dim)
-        self.A = SelfAttention(in_units=self.hparams.hidden_dim, out_units=64)
+        self.A = SelfAttention(self.hparams.hidden_dim, 64)
         self.P = nn.Linear(self.hparams.hidden_dim, self.hparams.out_features)        
 
         cameras = FoVPerspectiveCameras()
@@ -841,7 +841,7 @@ class SaxiIcoClassification(LightningModule):
         Y = Y.squeeze(dim=1)     
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -1090,7 +1090,7 @@ class SaxiIcoClassification_fs(LightningModule):
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -1273,9 +1273,9 @@ class SaxiSegmentation(LightningModule):
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
 
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, test_batch, batch_idx):
         # Test step
-        V, F, YF, CN = val_batch
+        V, F, YF, CN = test_batch
         x, X, PF = self(V, F, CN)
         y = torch.take(YF, PF).to(torch.int64)*(PF >= 0)
         x = x.permute(0, 2, 1, 3, 4) #batch, time, channels, h, w -> batch, channels, time, h, w
@@ -1614,7 +1614,7 @@ class SaxiMHA(LightningModule):
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -1870,7 +1870,7 @@ class SaxiRing_QC(LightningModule):
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -2232,7 +2232,7 @@ class SaxiMHAClassification(LightningModule):
         
         self.mha = MHA_KNN(embed_dim=self.hparams.output_dim, num_heads=self.hparams.output_dim, K=self.hparams.output_dim, dropout=self.hparams.dropout, return_v=True)
         self.flatten = nn.Flatten(start_dim=1)
-        self.fc = nn.Linear(self.hparams.output_dim*self.hparams.sample_levels[-1]*2, self.hparams.num_classes)
+        self.fc = nn.Linear(self.hparams.output_dim*self.hparams.sample_levels[-1]*2, self.hparams.out_classes)
         self.loss = nn.CrossEntropyLoss()
         
     @staticmethod
@@ -2253,7 +2253,7 @@ class SaxiMHAClassification(LightningModule):
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
         
         # classification parameters
-        group.add_argument("--num_classes", type=int, default=4, help='Number of output classes')
+        group.add_argument("--out_classes", type=int, default=4, help='Number of output classes')
 
         return parent_parser
     
@@ -2363,7 +2363,7 @@ class SaxiMHAFBClassification(LightningModule):
         self.ff_fb = FeedForward(self.hparams.output_dim, hidden_dim=self.hparams.hidden_dim, dropout=self.hparams.dropout)
         self.attn_fb = SelfAttention(self.hparams.output_dim, self.hparams.hidden_dim)
 
-        self.fc = nn.Linear(self.hparams.output_dim*2, self.hparams.num_classes)
+        self.fc = nn.Linear(self.hparams.output_dim*2, self.hparams.out_classes)
         
         cameras = FoVPerspectiveCameras()
 
@@ -2375,7 +2375,7 @@ class SaxiMHAFBClassification(LightningModule):
         
         self.loss = nn.CrossEntropyLoss()
         
-        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.num_classes)
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.out_classes)
 
         centers = torch.tensor([12.5000, 37.5000, 62.5000, 87.5000], dtype=torch.float32)
         self.register_buffer("centers", centers)
@@ -2404,7 +2404,7 @@ class SaxiMHAFBClassification(LightningModule):
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
         
         # classification parameters
-        group.add_argument("--num_classes", type=int, default=4, help='Number of output classes')
+        group.add_argument("--out_classes", type=int, default=4, help='Number of output classes')
 
         return parent_parser
     
@@ -2594,7 +2594,7 @@ class SaxiMHAFBClassification_V(LightningModule):
         self.mha_fb = nn.MultiheadAttention(self.hparams.output_dim, self.hparams.num_heads[-1], dropout=self.hparams.dropout, batch_first=True)
         self.attn_fb = SelfAttention(self.hparams.output_dim, self.hparams.hidden_dim)
 
-        self.fc = nn.Linear(self.hparams.output_dim*2, self.hparams.num_classes)
+        self.fc = nn.Linear(self.hparams.output_dim*2, self.hparams.out_classes)
         
         cameras = FoVPerspectiveCameras()
 
@@ -2606,7 +2606,7 @@ class SaxiMHAFBClassification_V(LightningModule):
         
         self.loss = nn.CrossEntropyLoss()
         
-        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.num_classes)
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.out_classes)
 
         centers = torch.tensor([12.5000, 37.5000, 62.5000, 87.5000], dtype=torch.float32)
         self.register_buffer("centers", centers)
@@ -2640,7 +2640,7 @@ class SaxiMHAFBClassification_V(LightningModule):
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
 
         # classification parameters
-        group.add_argument("--num_classes", type=int, default=4, help='Number of output classes')
+        group.add_argument("--out_classes", type=int, default=4, help='Number of output classes')
 
         return parent_parser
     
@@ -2987,10 +2987,10 @@ class SaxiMHAClassificationSingle(LightningModule):
         self.ff = Residual(FeedForward(self.hparams.embed_dim, hidden_dim=self.hparams.hidden_dim, dropout=self.hparams.dropout))
         self.mlp_out = ProjectionHead(self.hparams.embed_dim, hidden_dim=self.hparams.hidden_dim, output_dim=self.hparams.output_dim, dropout=self.hparams.dropout)
         
-        self.fc = nn.Linear(self.hparams.output_dim, self.hparams.num_classes)
+        self.fc = nn.Linear(self.hparams.output_dim, self.hparams.out_classes)
         self.loss = nn.CrossEntropyLoss()
 
-        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.num_classes)
+        self.accuracy = torchmetrics.Accuracy(task='multiclass', num_classes=self.hparams.out_classes)
         
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -3011,7 +3011,7 @@ class SaxiMHAClassificationSingle(LightningModule):
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
         
         # classification parameters
-        group.add_argument("--num_classes", type=int, default=None, help='Number of output classes', required=True)
+        group.add_argument("--out_classes", type=int, default=None, help='Number of output classes', required=True)
 
         return parent_parser
     
@@ -3090,7 +3090,7 @@ class SaxiMHAClassificationSingle(LightningModule):
         batch_size = V.shape[0]
         self.log("test_loss", loss, sync_dist=True, batch_size=batch_size)
         
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(X_hat, dim=1)
         prob = softmax(X_hat).detach()
         output = [predictions,Y, prob]
 
@@ -3799,7 +3799,7 @@ class SaxiRingMT(LightningModule):
         x = self((T1L, T2L, T3L, T1R, T2R, T3R))
         loss = self.loss_test(x, Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
         return output
@@ -3927,11 +3927,11 @@ class SaxiOctree(LightningModule):
     def test_step(self,test_batch,batch_idx):
         softmax = nn.Softmax(dim=1)
 
-        OL, OR, Y = test_batch
-        x = self((OL, OR, Y))
+        O, Y = test_batch
+        x = self(O)
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -3966,7 +3966,7 @@ class SaxiPointTransformer(LightningModule):
         self.y_true = []
 
         
-        self.model = PointTransformerV2(in_channels=self.hparams.in_channels, num_classes=self.hparams.num_classes)
+        self.model = PointTransformerV2(in_channels=self.hparams.in_channels, num_classes=self.hparams.out_classes)
 
         # Loss
         self.loss_train = nn.CrossEntropyLoss()
@@ -3974,17 +3974,16 @@ class SaxiPointTransformer(LightningModule):
         self.loss_test = nn.CrossEntropyLoss()
 
         #vAccuracy
-        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.num_classes,average='macro')
-        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.num_classes,average='macro')
+        self.train_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
+        self.val_accuracy = torchmetrics.Accuracy('multiclass',num_classes=self.hparams.out_classes,average='macro')
 
     @staticmethod
     def add_model_specific_args(parent_parser):
         group = parent_parser.add_argument_group("SaxiOctree")
         
         group.add_argument("--lr", type=float, default=1e-4)
-        group.add_argument("--out_classes", type=int, default=2)
         group.add_argument("--in_channels", type=int, default=3)
-        group.add_argument("--num_classes", type=int, default=4)
+        group.add_argument("--out_classes", type=int, default=4)
 
         return parent_parser
     
@@ -4289,7 +4288,7 @@ class SaxiRing(LightningModule):
         x = self((VL, FL, VFL, FFL, VR, FR, VFR, FFR))
         loss = self.loss_test(x,Y)
         self.log('test_loss', loss, batch_size=self.hparams.batch_size)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
@@ -4360,7 +4359,7 @@ class SaxiRingClassification(LightningModule):
             self.down2 = AttentionRings(self.hparams.hidden_dim, self.hparams.hidden_dim, self.hparams.hidden_dim, self.ring_neighs_42)
 
         # Layers of the network
-        self.TimeD = TimeDistributed(self.convnet)
+        self.F = TimeDistributed(self.convnet)
         self.W = nn.Linear(self.hparams.hidden_dim, self.hparams.out_size)
         self.Att = SelfAttention(self.hparams.hidden_dim, self.hparams.out_size, dim=2)  
         self.Drop = nn.Dropout(p=self.hparams.dropout_lvl)
@@ -4458,7 +4457,7 @@ class SaxiRingClassification(LightningModule):
 
     def forward(self, x):
         # Forward pass
-        x = self.TimeD(x)
+        x = self.F(x)
         if self.hparams.subdivision_level == 3:
             x, score = self.down1(x)
             x, score = self.down2(x)
@@ -4544,7 +4543,7 @@ class SaxiRingClassification(LightningModule):
         loss = self.loss(x, Y)
         batch_size = V.shape[0]
         self.log('val_loss', loss, batch_size=batch_size, sync_dist=True)
-        predictions = torch.argmax(x, dim=1, keepdim=True)
+        predictions = torch.argmax(x, dim=1)
         prob = softmax(x).detach()
         output = [predictions,Y, prob]
 
