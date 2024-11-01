@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import glob 
 import subprocess
@@ -311,14 +312,18 @@ def explainability_analysis(args, arg_groups, ext):
         })
         if args.nn in ["SaxiMHAFBClassification", "SaxiMHAFBRegression"]:
             gradcam_args.update({'target_layer': '_blocks'})
-        # if args.nn in ["SaxiClassification", "SaxiRegression", "SaxiRingClassification"]:
-        #     gradcam_args['target_class'] = None if args.nn != "SaxiClassification" else pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique()
+
+        if 'Regression' in args.nn :
+            gradcam_args['num_classes'] = 1
+        else:
+            classname = pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique()
+            gradcam_args['num_classes'] = len(pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique())
         # elif args.nn == "SaxiRing":
         #     gradcam_args.update({
         #         'target_class': 1.0,
         #         'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))
         #     })
-        gradcam_args.update({'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']), 'gradcam')})
+        gradcam_args.update({'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))})
 
         saxi_gradcam.main(Namespace(**gradcam_args))
         print(bcolors.SUCCESS, f"End explainability for fold {f}", bcolors.ENDC)

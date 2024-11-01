@@ -89,8 +89,10 @@ def SaxiMHAFB_Classification_Regression_gradcam(args, df_test, model, device):
         surf = test_ds.getSurf(idx)
         surf_path = test_ds.getSurfPath(idx)
 
-        for class_idx in range(model.hparams.num_classes):
-            args.target_class = class_idx
+        args.target_class = None
+        for class_idx in range(args.num_classes):
+            if args.num_classes > 1:
+                args.target_class = class_idx
             mv_att = mv_cam.attribute(inputs=(X_pc,X_views), target=class_idx,attr_dim_summation=False)
             # mv_att = multiview.attribute(inputs=(X_pc,X_views, x_v_fixed), target=class_idx,attr_dim_summation=False)
 
@@ -173,7 +175,7 @@ def SaxiClassification_Regression_gradcam(args, df_test, model, device):
         model : model loaded from checkpoint
         device : device (cuda or cpu)
     '''
-    model.ico_sphere(radius=args.radius, subdivision_level=args.subdivision_level)
+    # model.ico_sphere(radius=args.radius, subdivision_level=args.subdivision_level) ## what does it do 
     model = model.to(device)
     model.eval()
     test_ds = SaxiDataset(df_test, transform=EvalTransform(), **vars(args))
@@ -202,8 +204,11 @@ def SaxiClassification_Regression_gradcam(args, df_test, model, device):
         surf = test_ds.getSurf(idx)
         surf_path = test_ds.getSurfPath(idx)
 
-        for class_idx in range(model.hparams.out_classes):
-            args.target_class = class_idx
+
+        args.target_class = None
+        for class_idx in range(args.num_classes):
+            if args.num_classes > 1:
+                args.target_class = class_idx
             targets = None
             if not args.target_class is None:
                 targets = [ClassifierOutputTarget(args.target_class)]
@@ -467,6 +472,7 @@ def get_argparse():
     model_group.add_argument('--target_layer', type=str, help='Target layer for GradCam. For example in ResNet, the target layer is the last conv layer which is layer4', default='layer4')
     model_group.add_argument('--target_class', type=int, help='Target class', default=1)
     model_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification', default='SaxiClassification')
+    model_group.add_argument('--num_classes', type=int, help='number of classes', default=1)
 
     ##Gaussian Filter
     gaussian_group = parser.add_argument_group('Gaussian filter')
