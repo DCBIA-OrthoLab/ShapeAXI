@@ -9,11 +9,11 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
-from torch_geometric.nn.pool import voxel_grid
-from torch_scatter import segment_csr
+# from torch_geometric.nn.pool import voxel_grid
+# from torch_scatter import segment_csr
 
-import einops
-from timm.models.layers import DropPath
+# import einops
+# from timm.models.layers import DropPath
 # import pointops
 
 # This file contains the definition of the IcosahedronConv2d, IcosahedronConv1d and IcosahedronLinear classes, which are used to perform convolution and linear operations on icosahedral meshes
