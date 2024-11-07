@@ -25,6 +25,7 @@ import plotly.io as pio
 
 from shapeaxi import utils
 from shapeaxi.colors import bcolors
+from shapeaxi import saxi_nets_lightning
 
 # This file is used to evaluate the results of a classification or segmentation task (after the model has been trained and predictions have been made)
 
@@ -57,7 +58,15 @@ def plot_confusion_matrix(cm, classes,normalize=False,title='Confusion matrix',c
     return cm
 
 
-def choose_score(args,report):
+def choose_regression_score(args, errors_df):
+    if args.eval_metric in ['MAE', 'RMSE', 'ME']:
+        error = errors_df.loc[errors_df['Metric']==args.eval_metric]['Value'].iloc[0]
+        print(bcolors.PROC, f"{args.eval_metric}: {error}", bcolors.ENDC)
+        return error
+    else:
+      sys.exit("The value of score is not MAE, RMSE or ME. You must specify MAE, RMSE or ME.")
+
+def choose_classification_score(args,report):
     if args.eval_metric == 'F1':
       # Calculate F1 score
       weighted_f1_score = report["weighted avg"]["f1-score"]
@@ -177,8 +186,8 @@ def SaxiClassification_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
         print(json.dumps(report, indent=4))
         print(f"Saved classification report to {report_filename}")
 
-        score = choose_score(args, report)
-        return score
+        score = choose_classification_score(args, report)
+        return score, 'max'
 
 
 #####################################################################################################################################################################################
@@ -285,9 +294,9 @@ def SaxiSegmentation_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
 
 
     # Extraction of the score (AUC or F1)
-    score = choose_score(args,report)
+    score = choose_classification_score(args,report)
 
-    return score
+    return score, 'max'
 
 
 #####################################################################################################################################################################################
@@ -337,7 +346,9 @@ def SaxiRegression_eval(df, args, y_true_arr, y_pred_arr, path_to_csv):
     errors_filename = os.path.splitext(path_to_csv)[0] + "_errors.csv"
     errors_df.to_csv(errors_filename, index=False)
 
-    print(errors_df)
+    score = choose_regression_score(args, errors_df)
+
+    return score, 'min'
 
 
 def main(args):
@@ -361,6 +372,15 @@ def main(args):
         "SaxiMHA": SaxiClassification_eval,
         "SaxiSegmentation": SaxiSegmentation_eval,
         "SaxiRegression": SaxiRegression_eval,
+        "SaxiPointTransformer":SaxiClassification_eval,
+        "SaxiOctree":SaxiClassification_eval,
+        'SaxiMHAClassification': SaxiClassification_eval,
+        'SaxiMHAFBClassification': SaxiClassification_eval,
+        'SaxiMHAFBRegression': SaxiRegression_eval,
+        'SaxiOctree': SaxiClassification_eval,
+        'SaxiMHAFBRegression_V': SaxiRegression_eval,
+        'SaxiPointTransformer': SaxiClassification_eval,
+        'SaxiMHAFBClassification_V': SaxiClassification_eval,
     }
     
     if args.nn in eval_functions:
@@ -382,12 +402,12 @@ def get_argparse():
   parser.add_argument('--class_column', type=str, help='Which column to do the stats on', default='class')
   parser.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
   parser.add_argument('--csv_prediction_column', type=str, help='csv true class', default='pred')
-  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingMT', 'SaxiRingClassification', 'SaxiMHA', 'SaxiOctree'])
+  parser.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiRing, SaxiRingMT, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingMT', 'SaxiRingClassification', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiMHAFBRegression_V', 'SaxiOctree', 'SaxiPointTransformer'])
   parser.add_argument('--title', type=str, help='Title for the image', default='Confusion matrix')
   parser.add_argument('--figsize', type=str, nargs='+', help='Figure size', default=(6.4, 4.8))
   parser.add_argument('--surf_id', type=str, help='Name of array in point data for the labels', default='UniversalID')
   parser.add_argument('--pred_id', type=str, help='Name of array in point data for the predicted labels', default='PredictedID')
-  parser.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1 or AUC', default='F1', choices=['F1', 'AUC'])
+  parser.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1, AUC, MAE (Mean Absolute Error), RMSE (Root Mean Squared Error) or ME (Mean Error)', default='F1', choices=['F1', 'AUC','MAE', 'RMSE', 'ME'])
   parser.add_argument('--mount_point', type=str, help='Mount point for the data', default='./')
 
   return parser
@@ -395,7 +415,7 @@ def get_argparse():
 if __name__ == '__main__':
   parser = get_argparse()
   initial_args, unknownargs = parser.parse_known_args()
-  model_args = getattr(saxi_nets, initial_args.nn)
+  model_args = getattr(saxi_nets_lightning, initial_args.nn)
   model_args.add_model_specific_args(parser)
   args = parser.parse_args()
   main(args)

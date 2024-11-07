@@ -1076,3 +1076,143 @@ class SaxiOctreeDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return monai_DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, drop_last=True, collate_fn=self.collate_fn)
+    
+
+
+
+#####################################################################################################################################################################################
+#                                                                                                                                                                                   #
+#                                                                                     SaxiPoint                                                                                        #
+#                                                                                                                                                                                   #
+#####################################################################################################################################################################################
+
+class SaxiPointDataset(Dataset):
+
+    def __init__(self, df, mount_point="./", transform=None, surf_column="surf", surf_property=None, class_column=None, CN=True,use_normals=False, **kwargs):
+        self.df = df
+        self.mount_point = mount_point
+        self.transform = transform
+        self.surf_column = surf_column
+        self.class_column = class_column
+
+        self.use_normals=use_normals
+
+
+    def __len__(self):
+        return len(self.df.index)
+
+    def __getitem__(self, idx):
+        surf = self.getSurf(idx)
+
+        if self.transform:
+            surf = self.transform(surf)
+
+        coords, _ = utils.PolyDataToTensors_v_f(surf)
+        if self.use_normals:
+            try:
+                normals = utils.GetNormalsTensor(surf)
+            except:
+                print(coords.shape, self.getSurfPath(idx))
+
+            feat = torch.cat((coords, normals), dim=1)
+        else:
+            feat = coords
+
+        cl = torch.tensor(self.df.iloc[idx][self.class_column], dtype=torch.int64)
+
+        return coords.type(torch.float32), feat.type(torch.float32), cl.type(torch.int32)
+    
+    def getSurf(self, idx):
+        surf_path = os.path.join(self.mount_point, self.df.iloc[idx][self.surf_column])
+        return utils.ReadSurf(surf_path)
+    def getSurfPath(self, idx):
+        return self.df.iloc[idx][self.surf_column]
+    
+
+class SaxiPointDataModule(LightningDataModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+
+        self.df_train = pd.read_csv(self.hparams.csv_train)
+        self.df_val = pd.read_csv(self.hparams.csv_valid)
+        self.df_test = pd.read_csv(self.hparams.csv_test)
+
+        self.mount_point = self.hparams.mount_point
+
+        self.batch_size = self.hparams.batch_size 
+        
+        self.train_transform = self.hparams.train_transform
+        self.valid_transform = self.hparams.valid_transform
+        self.test_transform = self.hparams.test_transform
+        
+        self.num_workers = self.hparams.num_workers
+        self.surf_column = self.hparams.surf_column
+        self.class_column = self.hparams.class_column
+
+        self.use_normals = self.hparams.use_normals
+
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("SaxiOctreeDataModule")
+        
+        group.add_argument('--batch_size', type=int, default=16)
+        group.add_argument('--num_workers', type=int, default=6)
+        group.add_argument('--surf_column', type=str, default=None)
+        group.add_argument('--class_column', type=str, default=None)
+        group.add_argument('--csv_train', type=str, default=None)
+        group.add_argument('--csv_valid', type=str, default=None)
+        group.add_argument('--csv_test', type=str, default=None)
+        group.add_argument('--mount_point', type=str, default="./")
+        group.add_argument('--train_transform', type=Callable, default=None)
+        group.add_argument('--valid_transform', type=Callable, default=None)
+        group.add_argument('--test_transform', type=Callable, default=None)
+        group.add_argument('--use_normals', type=bool, default=True)
+
+        return parent_parser
+        
+
+    def setup(self,stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_dataset = SaxiPointDataset(df=self.df_train, transform = self.train_transform, mount_point=self.mount_point, surf_column=self.surf_column, class_column=self.class_column, use_normals=self.use_normals)
+        self.val_dataset = SaxiPointDataset(df=self.df_val, transform = self.valid_transform, mount_point=self.mount_point, surf_column=self.surf_column, class_column=self.class_column, use_normals=self.use_normals)
+        self.test_dataset = SaxiPointDataset(df=self.df_test, transform = self.test_transform, mount_point=self.mount_point, surf_column=self.surf_column, class_column=self.class_column, use_normals=self.use_normals)
+
+
+    def collate_fn(self,batch):
+        all_coords = []
+        all_feats = []
+        all_classes = []
+        batch_indices = []
+
+        offset = 0 
+        for i, (coords, feat, cls) in enumerate(batch):
+            num_points = coords.shape[0]
+
+            all_coords.append(coords)
+            all_feats.append(feat)
+            all_classes.append(cls)
+
+            # Create batch indices for this point cloud
+            batch_indices.append(torch.full((num_points,), i, dtype=torch.long))
+
+            # Increment the offset
+            offset += num_points
+
+        all_coords = torch.cat(all_coords, dim=0)  # Shape: (sum(N_i), 3)
+        all_feats = torch.cat(all_feats, dim=0)    # Shape: (sum(N_i), F) where F is the feature dimension
+        all_classes = torch.stack(all_classes)     
+        batch_indices = torch.cat(batch_indices)   # Shape: (sum(N_i),)
+
+        return all_coords, all_feats, batch_indices, all_classes
+
+    def train_dataloader(self):  
+        return monai_DataLoader(self.train_dataset,batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, pin_memory=True, drop_last=True, collate_fn=self.collate_fn)
+
+    def val_dataloader(self):
+        return monai_DataLoader(self.val_dataset,batch_size=self.batch_size, num_workers=self.num_workers, drop_last=True, collate_fn=self.collate_fn)        
+
+    def test_dataloader(self):
+        return monai_DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, drop_last=True, collate_fn=self.collate_fn)

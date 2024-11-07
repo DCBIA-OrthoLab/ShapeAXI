@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import glob 
 import subprocess
@@ -10,7 +11,7 @@ import torch.multiprocessing as mp
 import torch
 torch.set_float32_matmul_precision('high')
 
-from shapeaxi import compute_min_scale, split_train_eval, saxi_eval, saxi_predict, saxi_train, saxi_gradcam, saxi_nets
+from shapeaxi import compute_min_scale, saxi_predict, split_train_eval, saxi_eval, saxi_train, saxi_gradcam, saxi_nets_lightning
 from shapeaxi.colors import bcolors
 
 def get_last_checkpoint(checkpoint_dir):
@@ -156,7 +157,10 @@ def create_and_split_folds(args, arg_groups, ext):
 
 
 def train_test_eval_folds(args, arg_groups, scale_factor, ext):
-    best_eval_metric = 0.0
+    if 'Regression' in args.nn:
+        best_eval_metric = 1e5
+    else:
+        best_eval_metric = 0.0
     best_model_fold = ""
     for f in range(args.folds):
         print(bcolors.INFO, f"Start training for fold {f}", bcolors.ENDC)
@@ -171,7 +175,10 @@ def train_test_eval_folds(args, arg_groups, scale_factor, ext):
             for k in train_args:
                 if train_args[k]:
                     command.append('--' + str(k))
-                    command.append(str(train_args[k]))
+                    if isinstance(train_args[k],list):
+                        command.extend(map(str, train_args[k]))
+                    else:
+                        command.append(str(train_args[k]))
             subprocess.run(command)
         print(bcolors.SUCCESS, f"End training for fold {f}", bcolors.ENDC)
 
@@ -190,18 +197,29 @@ def test_model(args, arg_groups, ext, f):
     test_args = get_argparse_dict(saxi_predict.get_argparse())
     update_args_with_groups(test_args, arg_groups, [args.nn])
     test_args.update({
-        'csv': get_fold_filenames(args, ext, f)[2],
+        'csv_train': get_fold_filenames(args, ext, f)[0],
+        'csv_valid': get_fold_filenames(args, ext, f)[1],
+        'csv_test': get_fold_filenames(args, ext, f)[2],
         'model': get_best_checkpoint(os.path.join(args.out, 'train', f'fold{f}')),
         'surf_column': args.surf_column,
         'class_column': args.class_column,
         'mount_point': args.mount_point,
+        'data_module':args.data_module,
         'nn': args.nn,
         'out': os.path.join(args.out, 'test', f'fold{f}')
     })
-    out_prediction = os.path.join(test_args['out'], os.path.basename(test_args['model']), os.path.basename(test_args['csv']).replace(ext, "_prediction" + ext))
+    out_prediction = os.path.join(test_args['out'], os.path.basename(test_args['model']), os.path.basename(test_args['csv_test']).replace(ext, "_prediction" + ext))
 
     if not os.path.exists(out_prediction):
-        saxi_predict.main(Namespace(**test_args))
+        command = [sys.executable, '-m', 'shapeaxi.saxi_predict']
+        for k in test_args:
+            if test_args[k]:
+                command.append('--' + str(k))
+                if isinstance(test_args[k],list):
+                    command.extend(map(str, test_args[k]))
+                else:
+                    command.append(str(test_args[k]))
+        subprocess.run(command)
     
     return out_prediction
 
@@ -217,11 +235,17 @@ def evaluation_model(args, f, best_eval_metric, best_model_fold, out_prediction,
         'eval_metric': args.eval_metric,
         'mount_point': args.mount_point
     })
-    current_weighted_eval_metric = saxi_eval.main(Namespace(**eval_args))
+    current_weighted_eval_metric, comparaison_type = saxi_eval.main(Namespace(**eval_args))
 
-    if current_weighted_eval_metric > best_eval_metric:
-        best_eval_metric = current_weighted_eval_metric
-        best_model_fold = f'{f}'
+    if comparaison_type == 'min':
+        if current_weighted_eval_metric < best_eval_metric:
+            best_eval_metric = current_weighted_eval_metric
+            best_model_fold = f'{f}'
+
+    else:
+        if current_weighted_eval_metric > best_eval_metric:
+            best_eval_metric = current_weighted_eval_metric
+            best_model_fold = f'{f}'
     
     with open(eval_result_path, 'w') as f_out:
         f_out.write(str(current_weighted_eval_metric))
@@ -243,7 +267,7 @@ def aggregate_predictions(args, ext):
     for f in range(args.folds):
         out_prediction_fn = aggregate(ext, args, f, out_prediction_agg)
         out_prediction_agg.append(pd.read_csv(out_prediction_fn))
-        if args.nn == "SaxiClassification":
+        if 'Regression' not in args.nn :
             probs_fn = out_prediction_fn.replace("_prediction.csv", "_probs.pickle")
             out_prediction_probs_agg.append(pickle.load(open(probs_fn, 'rb')))
 
@@ -251,7 +275,7 @@ def aggregate_predictions(args, ext):
     output_agg_path = os.path.join(args.out, 'test', os.path.basename(args.csv.replace('.csv', '_train.csv')).replace(ext, "_aggregate_prediction" + ext))
     out_prediction_agg.to_csv(output_agg_path, index=False)
 
-    if args.nn == "SaxiClassification":
+    if 'Regression' not in args.nn :
         pickle.dump(np.concatenate(out_prediction_probs_agg), open(output_agg_path.replace("_prediction.csv", "_probs.pickle"), 'wb'))
 
     eval_aggregate_predictions(args, output_agg_path)
@@ -294,16 +318,21 @@ def explainability_analysis(args, arg_groups, ext):
             'model': get_best_checkpoint(os.path.join(args.out, 'train', f'fold{f}')),
             'target_layer': args.target_layer,
             'mount_point': args.mount_point,
-            'fps': args.fps,
         })
+        if args.nn in ["SaxiMHAFBClassification", "SaxiMHAFBRegression"]:
+            gradcam_args.update({'target_layer': '_blocks'})
 
-        if args.nn in ["SaxiClassification", "SaxiRegression", "SaxiRingClassification"]:
-            gradcam_args['target_class'] = None if args.nn != "SaxiClassification" else pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique()
-        elif args.nn == "SaxiRing":
-            gradcam_args.update({
-                'target_class': 1.0,
-                'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))
-            })
+        if 'Regression' in args.nn :
+            gradcam_args['num_classes'] = 1
+        else:
+            classname = pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique()
+            gradcam_args['num_classes'] = len(pd.read_csv(os.path.join(args.mount_point, csv_test))[args.class_column].unique())
+        # elif args.nn == "SaxiRing":
+        #     gradcam_args.update({
+        #         'target_class': 1.0,
+        #         'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))
+        #     })
+        gradcam_args.update({'out': os.path.join(args.out, 'test', f'fold{f}', os.path.basename(gradcam_args['model']))})
 
         saxi_gradcam.main(Namespace(**gradcam_args))
         print(bcolors.SUCCESS, f"End explainability for fold {f}", bcolors.ENDC)
@@ -326,18 +355,29 @@ def evaluate_best_model(args, ext, arg_groups, best_model_fold, best_eval_metric
     test_args = get_argparse_dict(saxi_predict.get_argparse())
     update_args_with_groups(test_args, arg_groups, [args.nn])
     test_args.update({
-        'csv': csv_test,
+        'csv_train': csv_test,
+        'csv_valid': csv_test,
+        'csv_test': csv_test,
         'model': best_model_path,
         'surf_column': args.surf_column,
         'class_column': args.class_column,
         'mount_point': args.mount_point,
-        'nn': args.nn,
-        'out': os.path.join(args.out, f'best_test_fold{best_model_fold}')
+        'data_module':args.data_module,
+        'nn': args.nn,        'out': os.path.join(args.out, f'best_test_fold{best_model_fold}')
     })
     out_prediction = os.path.join(test_args['out'], os.path.basename(best_model_path), os.path.basename(csv_test).replace(ext, "_prediction" + ext))
 
     if not os.path.exists(out_prediction):
-        saxi_predict.main(Namespace(**test_args))
+        command = [sys.executable, '-m', 'shapeaxi.saxi_predict']
+        for k in test_args:
+            if test_args[k]:
+                command.append('--' + str(k))
+                if isinstance(test_args[k],list):
+                    command.extend(map(str, test_args[k]))
+                else:
+                    command.append(str(test_args[k]))
+        subprocess.run(command)
+
     print(bcolors.SUCCESS, "End testing of the best model", bcolors.ENDC)
 
     print(bcolors.INFO, "Start evaluation of the best model", bcolors.ENDC)
@@ -372,6 +412,7 @@ def cml():
     # Arguments used for split the data into the different folds
     scale_group = parser.add_argument_group('Scale')
     scale_group.add_argument('--column_scale_factor', type=str, help='Specify the name if there already is a column with scale factor in the input file', default='surf_scale')
+    scale_group.add_argument('--compute_scale_factor', help='Compute a global scale factor for all shapes in the population.', type=int, default=0)
 
     split_group = parser.add_argument_group('Split')
     split_group.add_argument('--csv', type=str, help='CSV with columns surf,class', default=None)
@@ -383,14 +424,16 @@ def cml():
 
     # Arguments used for training
     train_group = parser.add_argument_group('Train')
-    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification', required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification'])
+    train_group.add_argument('--nn', type=str, help='Neural network name : SaxiClassification, SaxiRegression, SaxiSegmentation, SaxiIcoClassification, SaxiIcoClassification_fs, SaxiRing, SaxiRingClassification, SaxiRingMT, SaxiMHA, SaxiMHAClassification,SaxiMHAFBClassification, SaxiMHAFBRegression, SaxiOctree, SaxiMHAFBRegression_V, SaxiPointTransformer, SaxiMHAFBClassification_V,SaxiIdxAE, SaxiDenoiseUnet, SaxiDDPMUnet', 
+                             required=True, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification','SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V','SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
+
+    train_group.add_argument('--data_module', help='Data module type', required=True,choices=['SaxiDataModule', 'SaxiDataModuleVF', 'SaxiIcoDataModule', 'SaxiFreesurferDataModule', 'SaxiOctreeDataModule','SaxiPointDataModule',] ,type=str, default=None)
     train_group.add_argument('--epochs', type=int, help='Max number of epochs', default=200)   
     train_group.add_argument('--model', type=str, help='Model to continue training', default= None)
     train_group.add_argument('--surf_column', type=str, help='Surface column name', default="surf")
     train_group.add_argument('--class_column', type=str, help='Class column name', default="class")
     train_group.add_argument('--scale_factor', type=float, help='Scale factor for the shapes', default=1.0)
     train_group.add_argument('--profiler', type=str, help='Profiler', default=None)
-    train_group.add_argument('--compute_scale_factor', help='Compute a global scale factor for all shapes in the population.', type=int, default=0)
     train_group.add_argument('--compute_features', help='Compute features for the shapes in the population.', type=int, default=0)
     train_group.add_argument('--mount_point', type=str, help='Dataset mount directory', default="./")
     train_group.add_argument('--num_workers', type=int, help='Number of workers for loading', default=4)
@@ -408,7 +451,7 @@ def cml():
     eval_group.add_argument('--csv_true_column', type=str, help='Which column to do the stats on', default="class")
     eval_group.add_argument('--csv_tag_column', type=str, help='Which column has the actual names', default=None)
     eval_group.add_argument('--csv_prediction_column', type=str, help='csv true class', default="pred")
-    eval_group.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1 or AUC', default='F1', choices=['F1', 'AUC'])
+    eval_group.add_argument('--eval_metric', type=str, help='Score you want to choose for picking the best model : F1, AUC, MAE (Mean Absolute Error), RMSE (Root Mean Squared Error) or ME (Mean Error)', default='F1', choices=['F1', 'AUC','MAE', 'RMSE', 'ME'])
 
     # Arguments used for explainability
     explain_group = parser.add_argument_group('Explainability group')
@@ -430,7 +473,7 @@ def cml():
     logger_group.add_argument('--num_images', type=int, help='Number of images to log', default=12)
 
     initial_args, unknownargs = parser.parse_known_args()
-    model_args = getattr(saxi_nets, initial_args.nn)
+    model_args = getattr(saxi_nets_lightning, initial_args.nn)
     model_args.add_model_specific_args(parser)
 
     args = parser.parse_args()
@@ -470,12 +513,15 @@ def main(args, arg_groups):
     # Train and evaluate the model for each fold
     best_eval_metric, best_model_fold = train_test_eval_folds(args, arg_groups, scale_factor, ext)
     
-    # Aggregate the predictions
-    if args.nn in ["SaxiClassification", "SaxiRegression"]:
-        aggregate_predictions(args, ext)
+    #  Aggregate the predictions
+    aggregate_predictions(args, ext)
     
     # Compute the gradcam
-    explainability_analysis(args, arg_groups, ext)
+    try:
+        explainability_analysis(args, arg_groups, ext)
+    except ValueError as e:
+        if "Unknown neural network name" in str(e):
+            print(bcolors.WARNING, f"Warning: Explainability not defined for network {args.nn} - Skipping.",bcolors.ENDC)
 
     # Evaluate the best model
     evaluate_best_model(args, ext, arg_groups, best_model_fold, best_eval_metric)

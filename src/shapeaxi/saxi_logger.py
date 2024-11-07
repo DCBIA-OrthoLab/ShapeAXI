@@ -1098,3 +1098,151 @@ class SaxiClassRingLoggerNeptune(Callback):
             }]
         )
         return fig
+
+
+
+class SaxiMHAFBIdxBLoggerNeptune(Callback):
+    # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
+    def __init__(self, num_surf=1, log_steps=10):
+        self.log_steps = log_steps
+        self.num_surf = num_surf
+        self.num_samples = 1000
+        self.num_images = 12
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
+        # This function is called at the end of each training batch
+        if batch_idx % self.log_steps == 0:
+
+            with torch.no_grad():
+                V, F, CN, Y = batch
+
+                X_mesh = pl_module.create_mesh(V, F, CN)
+
+                X_samples = pl_module.sample_points_from_meshes(X_mesh, self.num_samples)
+                x_v_fixed = pl_module.sample_uniform(X_mesh.verts_list(),4096)
+                
+                fig = self.plot_pointclouds(X_samples[0].cpu().numpy())
+                trainer.logger.experiment["images/surf"].upload(fig)
+
+                fig = self.plot_pointclouds(x_v_fixed[0].cpu().numpy())
+                trainer.logger.experiment["images/x_v_fixed"].upload(fig)
+
+                X_fb, X_PF = pl_module.render(X_mesh)
+                
+                X_img = X_fb[0,:,0:3].permute(0,2,3,1).squeeze().cpu().numpy()
+                X_img = (X_img - X_img.min()) / (X_img.max() - X_img.min())*255
+                X_img_zbuf = X_fb[0,:,3:4].permute(0,2,3,1).squeeze().cpu().numpy()
+
+                fig = self.create_figure(X_img[0:self.num_images], X_img_zbuf[0:self.num_images])
+                trainer.logger.experiment["images/fb"].upload(fig)
+
+    
+    def plot_pointclouds(self, X):
+    
+
+        fig = make_subplots(
+            rows=1, cols=1,
+            specs=[[{'type': 'scatter3d'}]]
+        )
+
+        # First scatter plot
+        fig.add_trace(
+            go.Scatter3d(x=X[:,0], y=X[:,1], z=X[:,2], mode='markers', marker=dict(
+                size=2,
+                color=X[:,2],                # set color to an array/list of desired values
+                colorscale='Viridis',   # choose a colorscale
+                opacity=0.8
+            )),
+            row=1, col=1
+        )
+
+        # Update the layout if necessary
+        fig.update_layout(height=600, width=600, title_text="Side-by-Side 3D Scatter Plots")
+
+        return fig
+    
+    def create_figure(self, image_data1, image_data2):
+        fig = make_subplots(rows=1, cols=2, subplot_titles=('Image 1', 'Image 2'))
+
+        # Add initial frames for both images with shared coloraxis
+        fig.add_trace(go.Image(z=image_data1[0]), row=1, col=1)
+        fig.add_trace(go.Heatmap(z=image_data2[0], coloraxis="coloraxis"), row=1, col=2)
+
+        # Create frames for the animation
+        frames = []
+        for k in range(image_data1.shape[0]):
+            frame = go.Frame(data=[
+                go.Image(z=image_data1[k]),
+                go.Heatmap(z=image_data2[k], coloraxis="coloraxis")
+            ], name=str(k))
+            frames.append(frame)
+
+        # Add frames to the figure
+        fig.frames = frames
+
+        # Calculate the aspect ratio
+        height, width = image_data1[0].shape[:2]
+        aspect_ratio = height / width
+
+        # Determine global min and max values for consistent color scale
+        # vmin = min(image_data1.min(), image_data2.min())
+        # vmax = max(image_data1.max(), image_data2.max())
+        vmin = image_data2.min()
+        vmax = image_data2.max()
+
+        # Update layout with animation settings and fixed aspect ratio
+        fig.update_layout(
+            autosize=False,
+            width=1200,  # Adjust width as needed
+            height=600,  # Adjust height according to aspect ratio
+            coloraxis={"colorscale": "jet",
+                    "cmin": vmin,  # Set global min value for color scale
+                        "cmax": vmax},   # Set global max value for color scale},  # Set colorscale for the shared coloraxis
+            updatemenus=[{
+                "buttons": [
+                    {
+                        "args": [None, {"frame": {"duration": 500, "redraw": True},
+                                        "fromcurrent": True, "mode": "immediate"}],
+                        "label": "Play",
+                        "method": "animate"
+                    },
+                    {
+                        "args": [[None], {"frame": {"duration": 0, "redraw": False},
+                                        "mode": "immediate"}],
+                        "label": "Pause",
+                        "method": "animate"
+                    }
+                ],
+                "direction": "left",
+                "pad": {"r": 10, "t": 87},
+                "showactive": False,
+                "type": "buttons",
+                "x": 0.1,
+                "xanchor": "right",
+                "y": 0,
+                "yanchor": "top"
+            }],
+            sliders=[{
+                "steps": [
+                    {
+                        "args": [[str(k)], {"frame": {"duration": 300, "redraw": True},
+                                            "mode": "immediate"}],
+                        "label": str(k),
+                        "method": "animate"
+                    } for k in range(image_data1.shape[0])
+                ],
+                "active": 0,
+                "yanchor": "top",
+                "xanchor": "left",
+                "currentvalue": {
+                    "font": {"size": 20},
+                    "prefix": "Frame:",
+                    "visible": True,
+                    "xanchor": "right"
+                },
+                "transition": {"duration": 300, "easing": "cubic-in-out"}
+            }]
+        )
+        return fig 
+    
+

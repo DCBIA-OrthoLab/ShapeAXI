@@ -12,7 +12,7 @@ import torch
 from sklearn.utils import class_weight
 
 import lightning as L
-
+ 
 from lightning import Trainer
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -87,12 +87,12 @@ def Saxi_train(args, callbacks):
     args_d = vars(args)
 
 
-    # train_transform = TrainTransform(scale_factor=args.scale_factor)
-    # valid_transform = EvalTransform(scale_factor=args.scale_factor)
+    train_transform = TrainTransform(scale_factor=args.scale_factor)
+    valid_transform = EvalTransform(scale_factor=args.scale_factor)
     
-    # args_d['train_transform'] = train_transform
-    # args_d['valid_transform'] = valid_transform
-    # args_d['test_transform'] = valid_transform
+    args_d['train_transform'] = train_transform
+    args_d['valid_transform'] = valid_transform
+    args_d['test_transform'] = valid_transform
 
     data = DATAMODULE(**args_d)
     
@@ -132,7 +132,7 @@ def Saxi_train(args, callbacks):
     logger_neptune = None
     if args.neptune_tags:
         logger_neptune = NeptuneLogger(
-            project='ImageMindAnalytics/saxi',
+            project='ImageMindAnalytics/saxinets',
             tags=args.neptune_tags,
             api_key=os.environ['NEPTUNE_API_TOKEN'],
             log_model_checkpoints=False
@@ -150,14 +150,15 @@ def main(args):
         dirpath=args.out,
         filename='{epoch}-{val_loss:.2f}',
         save_top_k=2,
-        monitor='val_loss'
+        monitor='val_loss',
+        save_last=False
     )
     
     # Early Stopping
     early_stop_callback = EarlyStopping(
         monitor="val_loss", 
         min_delta=0.00, 
-        patience=args.patience, 
+        patience=200, 
         verbose=True, 
         mode="min"
     )
@@ -174,7 +175,12 @@ def get_argparse():
     hparams_group.add_argument('--steps', help='Max number of steps per epoch', type=int, default=-1)
 
     input_group = parser.add_argument_group('Input')
-    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V', 'SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
+    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, 
+                             choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification',
+                                       'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 
+                                       'SaxiMHA', 'SaxiMHAFBClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAClassification', 
+                                       'SaxiMHAFBRegression_V', 'SaxiPointTransformer', 'SaxiMHAFBClassification_V','SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
+
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     
     input_group.add_argument('--data_module', help='Data module type', required=True, type=str, default=None)
