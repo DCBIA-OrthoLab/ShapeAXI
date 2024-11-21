@@ -60,7 +60,7 @@ class RandomRotation:
     # This transform is used to make sure that the surface is in the unit cube
     def __call__(self, surf):
         if isinstance(surf, torch.Tensor):
-            surf, _a, _v = utils.RandomRotationT(surf)      
+            surf = RandomRotationTransform()(surf)
         else:
             surf, _a, _v = utils.RandomRotation(surf)
         return surf
@@ -114,14 +114,26 @@ class RandomRemoveLabeledRegionTransform:
                 if np.random.rand() > self.prob and (self.exclude is not None and id_to_remove not in self.exclude):
                     surf = Threshold(surf, self.surf_property ,id_to_remove-0.5,id_to_remove+0.5, invert=True)        
             return surf
+        
+class ScaleTransform:
+    # This transform is used to make sure that the surface is in the unit cube
+    def __init__(self, scale_factor=1.0):
+        self.scale_factor = scale_factor
+    def __call__(self, surf):
+        if isinstance(surf, torch.Tensor):
+            surf = utils.ScaletransformT(surf, self.scale_factor)      
+        else:
+            surf = utils.Scaletransform(surf, self.scale_factor)
+        return surf
 
 class TrainTransform:
     # This transform is used to make sure that the surface is in the unit cube
-    def __init__(self, scale_factor=None):
+    def __init__(self, scale_factor=None, rescale_factor=1.0):
         self.train_transform = transforms.Compose(
             [
                 UnitSurfTransform(scale_factor=scale_factor),
-                RandomRotation()
+                RandomRotation(),
+                ScaleTransform(scale_factor=rescale_factor)
             ]
         )
 
@@ -131,10 +143,11 @@ class TrainTransform:
 
 class EvalTransform:
     # This transform is used to make sure that the surface is in the unit cube
-    def __init__(self, scale_factor=None):
+    def __init__(self, scale_factor=None, rescale_factor=1.0):
         self.eval_transform = transforms.Compose(
             [
-                UnitSurfTransform(scale_factor=scale_factor)
+                UnitSurfTransform(scale_factor=scale_factor),
+                ScaleTransform(scale_factor=rescale_factor)
             ]
         )
 
@@ -199,10 +212,8 @@ class RotationTransform:
 
 class RandomRotationTransform:
     def __call__(self, verts):
-        rotation_matrix = pytorch3d.transforms.random_rotation()
-        rotation_transform = RotationTransform()
-        verts = rotation_transform(verts,rotation_matrix)
-        return verts
+        rotation_matrix = pytorch3d.transforms.random_rotation()        
+        return torch.matmul(verts, rotation_matrix.T)
 
 class ApplyRotationTransform:
     def __init__(self):            

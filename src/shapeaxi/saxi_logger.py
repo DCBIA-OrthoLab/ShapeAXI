@@ -550,7 +550,7 @@ class SaxiAELoggerNeptune(Callback):
     
 class SaxiDenoiseUnetLoggerNeptune(Callback):
     # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
-    def __init__(self, num_surf=8, log_steps=10, num_steps=10):
+    def __init__(self, num_surf=12, log_steps=10, num_steps=10):
         self.log_steps = log_steps
         self.num_surf = num_surf
         self.num_steps = num_steps
@@ -655,7 +655,7 @@ class SaxiDenoiseUnetLoggerNeptune(Callback):
 
 class SaxiDDPMLoggerNeptune(Callback):
     # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
-    def __init__(self, num_surf=1, log_steps=10, num_steps=10):
+    def __init__(self, num_surf=5, log_steps=10, num_steps=5):
         self.log_steps = log_steps
         self.num_surf = num_surf
         self.num_steps = num_steps
@@ -663,9 +663,26 @@ class SaxiDDPMLoggerNeptune(Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
         # This function is called at the end of each training batch
         if pl_module.global_step % self.log_steps == 0:
-
+            
+            pl_module.eval()
             with torch.no_grad():
-                V, F = batch
+
+                if isinstance(batch, tuple) or isinstance(batch, list):
+                    V, F = batch        
+                    X_mesh = pl_module.create_mesh(V, F)
+                    X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.num_samples)
+                    if hasattr(pl_module, 'sorter'):
+                        X = pl_module.sorter(X)
+                elif isinstance(batch, dict):
+                    X = batch['pointcloud']
+                else:
+                    X = batch
+                
+                fig = self.plot_diffusion(X[0:self.num_surf].cpu().numpy())
+                trainer.logger.experiment["images/batch"].upload(fig)
+                
+
+                # V, F = batch
 
                 # n = min(V.shape[0], self.num_surf)
 
@@ -676,21 +693,61 @@ class SaxiDDPMLoggerNeptune(Callback):
 
                 # X = pl_module.sample_points_from_meshes(X_mesh, pl_module.hparams.num_samples)
                 X = torch.randn((1, pl_module.hparams.num_samples, 3)).to(pl_module.device)
-                X_gen = []
-
-                num_diff_steps = int(pl_module.hparams.num_train_steps/self.num_steps)
-
-                for i, t in enumerate(range(pl_module.hparams.num_train_steps)):
-                    residual = pl_module(X, t)  # Again, note that we pass in our labels y
-
-                    X = pl_module.noise_scheduler.step(residual, t, X).prev_sample
-                    
-                    if i % num_diff_steps == 0:
-                        X_gen.append(X)
                 
-                fig = self.plot_diffusion(torch.cat(X_gen, dim=0).cpu().numpy())
-                # fig = self.plot_pointclouds(X.cpu().numpy(), X_noised.cpu().numpy(), X_hat.cpu().numpy())
-                trainer.logger.experiment["images/surf"].upload(fig)
+                if hasattr(pl_module, 'sample'):
+                    pc, intermediates = pl_module.sample(intermediate_steps=self.num_steps)
+                    
+                    fig = self.plot_diffusion(torch.cat(intermediates, dim=0).cpu().numpy())
+                    trainer.logger.experiment["images/intermediates"].upload(fig)
+
+                elif hasattr(pl_module, 'inferer'):
+                    
+                    pl_module.noise_scheduler.set_timesteps(num_inference_steps=pl_module.hparams.num_train_steps)
+
+                    context = None
+
+                    if hasattr(pl_module, 'flow'):
+                        context = pl_module.flow.sample(X.shape[0])
+
+                    pc, intermediates = pl_module.inferer.sample(
+                        input_noise=X, 
+                        diffusion_model=pl_module, 
+                        scheduler=pl_module.noise_scheduler, 
+                        save_intermediates=True, 
+                        intermediate_steps=pl_module.hparams.num_train_steps//self.num_steps, 
+                        verbose=False,
+                        conditioning=context
+                    )
+
+                    fig = self.plot_diffusion(torch.cat(intermediates, dim=0).cpu().numpy())
+                    trainer.logger.experiment["images/intermediates"].upload(fig)
+
+                else:
+
+                    X_gen = []
+                    X_orig_sample = []
+
+                    num_diff_steps = int(pl_module.hparams.num_train_steps/self.num_steps)
+
+                    for i, t in enumerate(range(pl_module.hparams.num_train_steps)):
+                        residual = pl_module(X, t)  
+
+                        scheduler_output = pl_module.noise_scheduler.step(residual, t, X)
+
+                        X = scheduler_output.prev_sample
+                        
+                        if i % num_diff_steps == 0:
+                            X_gen.append(X)
+
+                        if i % num_diff_steps == 0:
+                            X_orig_sample.append(scheduler_output.pred_original_sample)
+                    
+                    fig = self.plot_diffusion(torch.cat(X_gen, dim=0).cpu().numpy())
+                    # fig = self.plot_pointclouds(X.cpu().numpy(), X_noised.cpu().numpy(), X_hat.cpu().numpy())
+                    trainer.logger.experiment["images/prev_sample"].upload(fig)
+
+                    fig = self.plot_diffusion(torch.cat(X_orig_sample, dim=0).cpu().numpy())
+                    trainer.logger.experiment["images/pred_original_sample"].upload(fig)
 
     def plot_diffusion(self, X):
         num_surf = len(X)

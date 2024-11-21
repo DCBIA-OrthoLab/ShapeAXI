@@ -48,13 +48,21 @@ from shapeaxi.saxi_layers import *
 from shapeaxi.saxi_nets import *
 from shapeaxi.saxi_transforms import GaussianNoise, AvgPoolImages
 from shapeaxi.colors import bcolors
-from shapeaxi.saxi_losses import saxi_point_triangle_distance
+from shapeaxi.saxi_diffusion import VarianceSchedule, SaxiNoiseScheduler
 
 import lightning as L
 from lightning.pytorch.core import LightningModule
 
 from diffusers.models.embeddings import Timesteps, GaussianFourierProjection, TimestepEmbedding
-from diffusers import DDPMScheduler
+from diffusers import DDPMScheduler, FlowMatchEulerDiscreteScheduler
+from diffusers.models import UNet2DConditionModel
+
+
+from generative.inferers import DiffusionInferer as MonaiDiffusionInferer
+from generative.networks.schedulers import DDPMScheduler as MonaiDDPMScheduler
+
+from shapeaxi.saxi_flows import SaxiCouplingFlow
+import monai.networks.nets as monai_nets
 
 class SaxiClassification(LightningModule):
     # Saxi classification network
@@ -3733,8 +3741,10 @@ class SaxiDenoiseUnet(LightningModule):
                                      num_heads=self.hparams.num_heads, 
                                      stages=self.hparams.stages, 
                                      dropout=self.hparams.dropout, 
+                                     conv_v_kernel_size=self.hparams.conv_v_kernel_size,
                                      pooling_factor=self.hparams.pooling_factor, 
                                      pooling_hidden_dim=self.hparams.pooling_hidden_dim,
+                                     pooling_K=self.hparams.pooling_K,
                                      score_pooling=self.hparams.score_pooling,
                                      feed_forward_hidden_dim=self.hparams.feed_forward_hidden_dim, 
                                      use_skip_connection=self.hparams.use_skip_connection, 
@@ -3743,6 +3753,7 @@ class SaxiDenoiseUnet(LightningModule):
         
         self.decoder = MHAIdxDecoder(input_dim=self.hparams.stages[-1], 
                                      output_dim=self.hparams.output_dim, 
+                                     conv_v_kernel_size=self.hparams.conv_v_kernel_size[::-1],
                                      K=self.hparams.K[::-1], 
                                      num_heads=self.hparams.num_heads[::-1], 
                                      stages=self.hparams.stages[::-1], 
@@ -3753,31 +3764,36 @@ class SaxiDenoiseUnet(LightningModule):
                                      use_direction=self.hparams.use_direction, 
                                      use_layer_norm=self.hparams.use_layer_norm)
 
-        self.loss_fn = nn.MSELoss(reduction='sum')
+        self.loss_fn = nn.MSELoss()
     
     @staticmethod
     def add_model_specific_args(parent_parser):
         group = parent_parser.add_argument_group("SaxiDenoiseUnet")
-
         
         group.add_argument("--lr", type=float, default=1e-4)
         group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.01)
         
         # Encoder/Decoder params
-        group.add_argument("--num_samples", type=int, default=1000, help='Number of samples to take from the mesh to start the encoding')
+        group.add_argument("--num_samples", type=int, default=10000, help='Number of samples to take from the mesh to start the encoding')
         group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
         group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')
-        group.add_argument("--K", type=int, nargs="*", default=[(96, 32), (96, 32)], help='Number of K neighbors for each stage. If tuple (K_neighbors, Farthest_K_neighbors)')
-        group.add_argument("--num_heads", type=int, nargs="*", default=[64, 128], help='Number of attention heads per stage the encoder')
-        group.add_argument("--stages", type=int, nargs="*", default=[64, 128], help='Dimension per stage')
+        group.add_argument("--conv_v_kernel_size", type=int, nargs="*", default=[27, 27, 27, 27], help='Kernel size for the convolutional layer in the encoder')
+        group.add_argument("--K", type=int, nargs="*", default=[None, None, (27, 128), (27, 256)], help='Number of K neighbors for each stage. If tuple (K_neighbors, Farthest_K_neighbors)')
+        group.add_argument("--num_heads", type=int, nargs="*", default=[None, None, 128, 256], help='Number of attention heads per stage the encoder')
+        group.add_argument("--stages", type=int, nargs="*", default=[64, 128, 256, 512], help='Dimension per stage')
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
-        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.75, 0.75], help='Pooling factor')
+        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.25, 0.25, 0.5, 0.5], help='Pooling factor')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[32, 64, 128, 256], help='Hidden dim for the pooling layer')
+        group.add_argument("--pooling_K", type=int, nargs="*", default=[27, 27, 27, 27], help='Hidden dim for the pooling layer')
         group.add_argument("--score_pooling", type=int, default=0, help='Use score base pooling')
-        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[32, 64], help='Hidden dim for the pooling layer')
-        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[32, 64], help='Hidden dim for the Residual FeedForward layer')
+        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[32, 64, 128, 256], help='Hidden dim for the Residual FeedForward layer')
         group.add_argument("--use_skip_connection", type=int, default=1, help='Use skip connections, i.e., unet style network')
         group.add_argument("--use_layer_norm", type=int, default=1, help='Use layer norm')
         group.add_argument("--use_direction", type=int, default=1, help='Use direction instead of position')
+        
+        # group.add_argument("--loss_chamfer_weight", type=float, default=1.0, help='Loss weight for the chamfer distance')
+        # group.add_argument("--loss_mesh_face_weight", type=float, default=1.0, help='Loss weight for the mesh face distance')
+        # group.add_argument("--loss_mesh_edge_weight", type=float, default=1.0, help='Loss weight for the mesh edge distance')
 
         return parent_parser
     
@@ -3794,12 +3810,28 @@ class SaxiDenoiseUnet(LightningModule):
         return sample_points_from_meshes(x_mesh, Ns, return_normals=return_normals)
 
     def compute_loss(self, X, X_hat, step="train", sync_dist=False):
-
         loss = self.loss_fn(X, X_hat)
-
         self.log(f"{step}_loss", loss, sync_dist=sync_dist)
-
         return loss
+
+    # def compute_loss(self, X_mesh, X_hat, step="train", sync_dist=False):
+        
+    #     X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        
+    #     loss_chamfer, _ = chamfer_distance(X, X_hat, batch_reduction="mean", point_reduction="mean")        
+
+    #     X_hat_PC = Pointclouds(X_hat)
+    #     loss_point_mesh_face = point_mesh_face_distance(X_mesh, X_hat_PC)
+    #     loss_point_mesh_edge = point_mesh_edge_distance(X_mesh, X_hat_PC)
+
+    #     loss = loss_chamfer*self.hparams.loss_chamfer_weight + loss_point_mesh_face*self.hparams.loss_mesh_face_weight + loss_point_mesh_edge*self.hparams.loss_mesh_edge_weight
+
+    #     self.log(f"{step}_loss", loss, sync_dist=sync_dist)        
+    #     self.log(f"{step}_loss_chamfer", loss_chamfer, sync_dist=sync_dist)
+    #     self.log(f"{step}_loss_point_mesh_face", loss_point_mesh_face, sync_dist=sync_dist)
+    #     self.log(f"{step}_loss_point_mesh_edge", loss_point_mesh_edge, sync_dist=sync_dist)
+
+    #     return loss
     
     def corrupt(self, x, amount):
         """Corrupt the input `x` by mixing it with noise according to `amount`"""
@@ -3862,17 +3894,20 @@ class SaxiDDPMUnet(LightningModule):
                                      num_heads=self.hparams.num_heads, 
                                      stages=self.hparams.stages, 
                                      dropout=self.hparams.dropout, 
+                                     conv_v_kernel_size=self.hparams.conv_v_kernel_size,
                                      pooling_factor=self.hparams.pooling_factor, 
                                      pooling_hidden_dim=self.hparams.pooling_hidden_dim,
+                                     pooling_K=self.hparams.pooling_K,
                                      score_pooling=self.hparams.score_pooling,
                                      feed_forward_hidden_dim=self.hparams.feed_forward_hidden_dim, 
                                      use_skip_connection=self.hparams.use_skip_connection, 
                                      use_direction=self.hparams.use_direction, 
-                                     use_layer_norm=self.hparams.use_layer_norm, 
+                                     use_layer_norm=self.hparams.use_layer_norm,
                                      time_embed_dim=self.hparams.time_embed_dim)
         
         self.decoder = MHAIdxDecoder(input_dim=self.hparams.stages[-1], 
                                      output_dim=self.hparams.output_dim, 
+                                     conv_v_kernel_size=self.hparams.conv_v_kernel_size[::-1],
                                      K=self.hparams.K[::-1], 
                                      num_heads=self.hparams.num_heads[::-1], 
                                      stages=self.hparams.stages[::-1], 
@@ -3884,17 +3919,17 @@ class SaxiDDPMUnet(LightningModule):
                                      use_layer_norm=self.hparams.use_layer_norm,
                                      time_embed_dim=self.hparams.time_embed_dim)
 
-        self.loss_fn = nn.MSELoss(reduction='sum')
+        self.loss_fn = nn.MSELoss()
 
         # time
         if self.hparams.time_embedding_type == "fourier":
-            self.time_proj = GaussianFourierProjection(embedding_size=self.hparams.stages[0], scale=16)
-            timestep_input_dim = 2 * self.hparams.stages[0]
+            self.time_proj = GaussianFourierProjection(embedding_size=self.time_embed_dim, scale=16)
+            timestep_input_dim = 2 * self.time_embed_dim
         elif self.hparams.time_embedding_type == "positional":
-            self.time_proj = Timesteps(self.hparams.stages[0], self.hparams.flip_sin_to_cos, self.hparams.freq_shift)
+            self.time_proj = Timesteps(self.time_embed_dim, self.hparams.flip_sin_to_cos, self.hparams.freq_shift)
             timestep_input_dim = self.hparams.stages[0]
         elif self.hparams.time_embedding_type == "learned":
-            self.time_proj = nn.Embedding(self.hparams.num_train_timesteps, self.stages[0])
+            self.time_proj = nn.Embedding(self.hparams.num_train_timesteps, self.time_embed_dim)
             timestep_input_dim = self.hparams.stages[0]
 
         self.time_embedding = TimestepEmbedding(timestep_input_dim, self.hparams.time_embed_dim)
@@ -3913,20 +3948,21 @@ class SaxiDDPMUnet(LightningModule):
         group.add_argument("--num_samples", type=int, default=1000, help='Number of samples to take from the mesh to start the encoding')
         group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
         group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')
-        group.add_argument("--K", type=int, nargs="*", default=[(64, 64), (64, 64)], help='Number of K neighbors for each stage')
-        group.add_argument("--num_heads", type=int, nargs="*", default=[64, 128], help='Number of attention heads per stage the encoder')
-        group.add_argument("--stages", type=int, nargs="*", default=[64, 128], help='Dimension per stage')
+        group.add_argument("--conv_v_kernel_size", type=int, nargs="*", default=[27, 27, 27], help='Kernel size for the convolutional layer in the encoder')
+        group.add_argument("--K", type=int, nargs="*", default=[(27, 64), (27, 128), (27, 256)], help='Number of K neighbors for each stage. If tuple (K_neighbors, Farthest_K_neighbors)')
+        group.add_argument("--num_heads", type=int, nargs="*", default=[8, 8, 8], help='Number of attention heads per stage the encoder')
+        group.add_argument("--stages", type=int, nargs="*", default=[64, 128, 256], help='Dimension per stage')
         group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
-        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.75, 0.75], help='Pooling factor')
+        group.add_argument("--pooling_factor", type=float, nargs="*", default=[1.0, 1.0, 1.0], help='Pooling factor')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[32, 64, 128], help='Hidden dim for the pooling layer')
+        group.add_argument("--pooling_K", type=int, nargs="*", default=[27, 27, 27], help='Number of neighbors to consider during pooling')
         group.add_argument("--score_pooling", type=int, default=0, help='Use score base pooling')
-        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[32, 64], help='Hidden dim for the pooling layer')
-        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[32, 64], help='Hidden dim for the Residual FeedForward layer')
+        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[32, 64, 128], help='Hidden dim for the Residual FeedForward layer')
         group.add_argument("--use_skip_connection", type=int, default=1, help='Use skip connections, i.e., unet style network')
         group.add_argument("--use_layer_norm", type=int, default=1, help='Use layer norm')
-        group.add_argument("--use_direction", type=int, default=0, help='Use direction instead of position')
-        group.add_argument("--num_train_steps", type=int, default=1000, help='Number of training steps')
+        group.add_argument("--use_direction", type=int, default=1, help='Use direction instead of position')
         
-
+        group.add_argument("--num_train_steps", type=int, default=250, help='Number of training steps for the noise scheduler')
         group.add_argument("--time_embedding_type", type=str, default='positional', help='Time embedding type', choices=['fourier', 'positional', 'learned'])
         group.add_argument("--time_embed_dim", type=int, default=128, help='Time embedding dimension')
         group.add_argument("--flip_sin_to_cos", type=int, default=1, help='Whether to flip sin to cos for Fourier time embedding.')
@@ -3954,12 +3990,6 @@ class SaxiDDPMUnet(LightningModule):
         self.log(f"{step}_loss", loss, sync_dist=sync_dist)
 
         return loss
-    
-    # def corrupt(self, x, amount):
-    #     """Corrupt the input `x` by mixing it with noise according to `amount`"""
-    #     noise = torch.rand_like(x)
-    #     amount = amount.view(-1, 1, 1)  # Sort shape so broadcasting works
-    #     return x * (1 - amount) + noise * amount
 
     def training_step(self, train_batch, batch_idx):
         V, F = train_batch
@@ -3990,7 +4020,8 @@ class SaxiDDPMUnet(LightningModule):
 
         noise = torch.randn_like(X).to(self.device)
         
-        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+        timesteps = torch.arange(0, X.shape[0])/X.shape[0]*self.hparams.num_train_steps
+        timesteps = timesteps.long().to(self.device)
 
         noisy_X = self.noise_scheduler.add_noise(X, noise, timesteps)
 
@@ -3998,35 +4029,976 @@ class SaxiDDPMUnet(LightningModule):
 
         self.compute_loss(noise, X_hat, step="val", sync_dist=True)
 
-    def sampling(self, z_mu: torch.Tensor, z_sigma: torch.Tensor) -> torch.Tensor:        
-        eps = torch.randn_like(z_sigma)
-        z_vae = z_mu + eps * z_sigma
-        return z_vae
+    def forward(self, x: torch.tensor, timesteps: Union[torch.Tensor, float, int]):
 
-    def forward(self, x: torch.tensor, timestep: Union[torch.Tensor, float, int]):
-
-        # 1. time
-        timesteps = timestep
         if not torch.is_tensor(timesteps):
             timesteps = torch.tensor([timesteps], dtype=torch.long, device=self.device)
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(self.device)
 
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-        timesteps = timesteps * torch.ones(x.shape[0], dtype=timesteps.dtype, device=timesteps.device)
-
         t_emb = self.time_proj(timesteps)
-        # timesteps does not contain any weights and will always return f32 tensors
-        # but time_embedding might actually be running in fp16. so we need to cast here.
-        # there might be better ways to encapsulate this.
-        t_emb = t_emb.to(dtype=self.dtype)
-        emb = self.time_embedding(t_emb)
+        t_emb = self.time_embedding(t_emb)
 
         skip_connections = None
 
         if self.hparams.use_skip_connection:
-            z, unpooling_idxs, skip_connections = self.encoder(x, x, time=emb)
+            z, unpooling_idxs, skip_connections = self.encoder(x, x, time=t_emb)
         else:
             z, unpooling_idxs = self.encoder(x, x, time=emb)
 
-        return self.decoder(z, unpooling_idxs, skip_connections, time=emb)
+        return self.decoder(z, unpooling_idxs, skip_connections, time=t_emb)
+
+class SaxiDDPMPC(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = PointNetEncoder(self.hparams.embed_dim, input_dim=self.hparams.input_dim)
+        # self.encoder = MHAEncoder(
+        #     input_dim=self.hparams.input_dim,             
+        #     output_dim=self.hparams.embed_dim,             
+        #     stages=self.hparams.stages,
+        #     num_heads=self.hparams.num_heads, 
+        #     dropout=self.hparams.dropout, 
+        #     use_layer_norm=self.hparams.use_layer_norm,
+        #     feed_forward_hidden_dim=self.hparams.feed_forward_hidden_dim,
+        #     pooling_factor=self.hparams.pooling_factor,
+        #     score_pooling=self.hparams.score_pooling,
+        #     pooling_K=self.hparams.pooling_K,
+        #     pooling_hidden_dim=self.hparams.pooling_hidden_dim,
+        #     use_mean_proj=True
+        # )
+
+        self.flow = SaxiCouplingFlow(
+            features=self.hparams.embed_dim, 
+            num_layers=14
+        )
+
+        self.diffnet = ContextModulatedNet(
+            input_dim=self.hparams.input_dim, 
+            stages=self.hparams.stages_diff, 
+            context_dim=self.hparams.embed_dim + self.hparams.time_embed_dim,
+        )
+        
+
+        self.loss_fn = nn.MSELoss()
+
+    # time
+        if self.hparams.time_embedding_type == "fourier":
+            self.time_proj = GaussianFourierProjection(embedding_size=self.hparams.time_embed_dim, scale=16)
+            timestep_input_dim = 2 * self.hparams.time_embed_dim
+        elif self.hparams.time_embedding_type == "positional":
+            self.time_proj = Timesteps(self.hparams.time_embed_dim, self.hparams.flip_sin_to_cos, self.hparams.freq_shift)
+            timestep_input_dim = self.hparams.time_embed_dim
+        elif self.hparams.time_embedding_type == "learned":
+            self.time_proj = nn.Embedding(self.hparams.num_train_steps, self.hparams.time_embed_dim)
+            timestep_input_dim = self.hparams.time_embed_dim
+
+        self.time_embedding = TimestepEmbedding(timestep_input_dim, self.hparams.time_embed_dim)
+
+        self.noise_scheduler = DDPMScheduler(num_train_timesteps=self.hparams.num_train_steps, 
+                                             beta_schedule="linear",
+                                             clip_sample=False,
+                                             prediction_type='epsilon')
+        # self.noise_scheduler =  VarianceSchedule(
+        #         num_steps=self.hparams.num_train_steps,
+        #         beta_1=1e-4,
+        #         beta_T=0.02,
+        #         mode='linear'
+        #     )
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiDDPMPC")
+
+        group.add_argument("--lr", type=float, default=2e-3)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.0)
+        
+        # Encoder params
+        group.add_argument("--scale_input", type=float, default=1.0, help='Scale the input')
+        group.add_argument("--num_samples", type=int, default=2048, help='Number of samples to take from the mesh to start the encoding')
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=256, help='Embedding dimension')
+        group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')        
+        group.add_argument("--stages", type=int, nargs="*", default=[32, 64, 128, 256], help='Dimension per stage for the encoder')
+        group.add_argument("--num_heads", type=int, nargs="*", default=[8, 8, 8, 8], help='Number of attention heads per transformer block')
+        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[16, 32, 64, 128], help='Hidden dim for the Residual FeedForward layer')
+
+        group.add_argument("--stages_diff", type=int, nargs="*", default=[32, 64, 128, 64, 32, 3], help='Dimension per stage for the diffusion model')
+        # group.add_argument("--num_heads_diff", type=int, nargs="*", default=[8, 8, 8, 8, 8], help='Number of attention heads per transformer block')
+        # group.add_argument("--feed_forward_hidden_dim_diff", type=int, nargs="*", default=[16, 32, 64, 32, 16], help='Hidden dim for the Residual FeedForward layer')
+
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        group.add_argument("--use_layer_norm", type=int, default=1, help='Use layer norm')
+        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.25, 0.25, 0.25, 0.25], help='Pooling factor')
+        group.add_argument("--pooling_K", type=int, nargs="*", default=[27, 27, 27, 27], help='Number of neighbors to consider during pooling')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[16, 32, 64, 128], help='Hidden dim for the pooling layer')        
+        group.add_argument("--score_pooling", type=int, default=0, help='Use score base pooling')
+        
+        group.add_argument("--num_train_steps", type=int, default=1000, help='Number of training steps for the noise scheduler')
+        group.add_argument("--time_embedding_type", type=str, default='positional', help='Time embedding type', choices=['fourier', 'positional', 'learned'])
+        group.add_argument("--time_embed_dim", type=int, default=3, help='Time embedding dimension')
+        group.add_argument("--flip_sin_to_cos", type=int, default=1, help='Whether to flip sin to cos for Fourier time embedding.')
+        group.add_argument("--freq_shift", type=int, default=0, help='Frequency shift for Fourier time embedding.')
+
+        group.add_argument('--kl_weight', help='Weight for loss function', type=float, default=0.001)
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        return sample_points_from_meshes(x_mesh, Ns, return_normals=return_normals)
+
+    def reparameterize_gaussian(self, mean, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn(std.size()).to(mean)
+        return mean + std * eps
+
+    def gaussian_entropy(self, logvar):
+        const = 0.5 * float(logvar.size(1)) * (1. + np.log(np.pi * 2))
+        ent = 0.5 * logvar.sum(dim=1, keepdim=False) + const
+        return ent
+
+    def compute_loss(self, X, X_hat, z_sigma, z, step="train", sync_dist=False):
+        
+        # H[Q(z|X)]
+        # loss_entropy = 0
+        loss_entropy = -self.gaussian_entropy(logvar=z_sigma).mean()      # (B, )
+
+        # P(z), Prior probability, parameterized by the flow: z -> w.
+        loss_prior = -self.flow.log_prob(inputs=z).mean()
+
+        # Negative ELBO of P(X|z)
+        loss_recons = self.loss_fn(X, X_hat)
+
+        loss = loss_recons + (loss_entropy + loss_prior) * self.hparams.kl_weight
+
+        # self.log(f"{step}_loss_entropy", loss_entropy, sync_dist=sync_dist)
+        self.log(f"{step}_loss_prior", loss_prior, sync_dist=sync_dist)
+        self.log(f"{step}_loss_recons", loss_recons, sync_dist=sync_dist)        
+        self.log(f"{step}_loss", loss, sync_dist=sync_dist)
+        
+        self.log(f"{step}_z_var", (0.5*z_sigma).exp().mean(), sync_dist=sync_dist)
+        self.log(f"{step}_x_hat_mean", X_hat.mean(), sync_dist=sync_dist)
+        self.log(f"{step}_x_hat_std", X_hat.std(), sync_dist=sync_dist)
+
+        return loss
+
+    def training_step(self, train_batch, batch_idx):
+        
+        if isinstance(train_batch, tuple) or isinstance(train_batch, list):
+            V, F = train_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        elif isinstance(train_batch, dict):
+            X = train_batch['pointcloud']
+        else:
+            X = train_batch
+
+        X = X * self.hparams.scale_input
+        z_mu, z_sigma = self.encoder(X)
+        # z_mu, z_sigma = self.encoder(X, X)
+        # z_mu = z_mu.mean(dim=1)
+        # z_sigma = z_sigma.mean(dim=1)
+
+        z = self.reparameterize_gaussian(mean=z_mu, logvar=z_sigma) 
+
+        noise = torch.randn_like(X).to(self.device)
+
+        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+
+        noisy_X = self.noise_scheduler.add_noise(X, noise=noise, timesteps=timesteps)
+
+        X_hat = self(noisy_X, timesteps=timesteps, context=z)
+
+        loss = self.compute_loss(X=noise, X_hat=X_hat, z_sigma=z_sigma, z=z)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        if isinstance(val_batch, tuple) or isinstance(val_batch, list):
+            V, F = val_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        elif isinstance(val_batch, dict):
+            X = val_batch['pointcloud']
+        else:
+            X = val_batch
+
+        X = X * self.hparams.scale_input
+        z_mu, z_sigma = self.encoder(X)
+        # z_mu, z_sigma = self.encoder(X, X)
+        # z_mu = z_mu.mean(dim=1)
+        # z_sigma = z_sigma.mean(dim=1)
+
+        z = self.reparameterize_gaussian(mean=z_mu, logvar=z_sigma) 
+
+        noise = torch.randn_like(X).to(self.device)
+
+        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+
+        noisy_X = self.noise_scheduler.add_noise(X, noise=noise, timesteps=timesteps)
+
+        X_hat = self(noisy_X, timesteps=timesteps, context=z)
+
+        loss = self.compute_loss(X=noise, X_hat=X_hat, z_sigma=z_sigma, z=z, step="val", sync_dist=True)
+
+    def forward(self, x: torch.tensor, timesteps: Union[torch.Tensor, float, int], context: torch.Tensor | None = None):
+
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=self.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(self.device)
+
+        if timesteps.shape[0] != x.shape[0]:
+            timesteps = timesteps.repeat(x.shape[0])
+
+        t_emb = self.time_proj(timesteps)
+        t_emb = self.time_embedding(t_emb)
+
+        return self.diffnet(x, context=context.unsqueeze(1), time=t_emb.unsqueeze(1))
+
+    def sample(self, num_samples=1, intermediate_steps=None):
+        intermediates = []
+        if intermediate_steps is None:
+            num_diff_steps = self.hparams.num_train_steps
+        else:
+            num_diff_steps = int(self.hparams.num_train_steps/intermediate_steps)
+
+
+        X_t = torch.randn(num_samples, self.hparams.num_samples, self.hparams.input_dim).to(self.device)
+
+        z = self.flow.sample(num_samples)
+
+        # for t in range(self.hparams.num_train_steps - 1, 0, -1):
+        #     x_hat = self(X_t, timesteps=t, context=z)  
+
+        #     X_t = self.noise_scheduler.step(model_output=x_hat, timestep=t, sample=X_t).prev_sample
+            
+        #     if intermediate_steps > 0 and t % (self.hparams.num_train_steps//intermediate_steps) == 0:
+        #         intermediates.append(X_t)
+        # Random starting point (8 random images):        
+
+        for i, t in enumerate(self.noise_scheduler.timesteps):
+
+            
+            x_hat = self(X_t, timesteps=t, context=z)  
+
+            # Update sample with step
+            X_t = self.noise_scheduler.step(model_output=x_hat, timestep=t, sample=X_t).prev_sample
+            # X_t = X_t.clone().detach()
+            if intermediate_steps > 0 and t % (self.hparams.num_train_steps//intermediate_steps) == 0:
+                intermediates.append(X_t)
+
+        return X_t, intermediates
+
+            # if i % num_diff_steps == 0:
+            #     X_orig_sample.append(scheduler_output.pred_original_sample)
+
+        # Random starting point (8 random images):
+
+
+        # X_t = torch.randn(num_samples, self.hparams.num_samples, self.hparams.input_dim).to(self.device)
+        # z = self.flow.sample(num_samples)
+
+        # for t in range(self.hparams.num_train_steps, 0, -1):            
+        #     X_t = self.noise_scheduler.step(X_t, t, z, self.diffnet)
+            
+        #     if intermediate_steps > 0 and t % (self.hparams.num_train_steps//intermediate_steps) == 0:
+        #         intermediates.append(X_t)
+        
+        # return X_t, intermediates
+
+        
+        
+
+
+class SaxiDDPMPC_Monai(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = MHAEncoder(
+            input_dim=self.hparams.input_dim,             
+            output_dim=self.hparams.embed_dim,             
+            stages=self.hparams.stages,
+            num_heads=self.hparams.num_heads, 
+            dropout=self.hparams.dropout, 
+            use_layer_norm=self.hparams.use_layer_norm,
+            feed_forward_hidden_dim=self.hparams.feed_forward_hidden_dim,
+            pooling_factor=self.hparams.pooling_factor,
+            score_pooling=self.hparams.score_pooling,
+            pooling_K=self.hparams.pooling_K,
+            pooling_hidden_dim=self.hparams.pooling_hidden_dim,
+            use_mean_proj=True
+        )
+
+        self.flow = SaxiCouplingFlow(
+            features=self.hparams.embed_dim, 
+            num_layers=14
+        )
+
+        self.diffnet = ContextModulatedNet(
+            input_dim=self.hparams.input_dim, 
+            stages=self.hparams.stages_diff, 
+            context_dim=self.hparams.embed_dim + self.hparams.time_embed_dim,
+        )
+
+        self.loss_fn = nn.MSELoss()
+
+        self.noise_scheduler = MonaiDDPMScheduler(num_train_timesteps=self.hparams.num_train_steps)
+        self.inferer = MonaiDiffusionInferer(self.noise_scheduler)
+
+        # time
+        if self.hparams.time_embedding_type == "fourier":
+            self.time_proj = GaussianFourierProjection(embedding_size=self.hparams.time_embed_dim, scale=16)
+            timestep_input_dim = 2 * self.hparams.time_embed_dim
+        elif self.hparams.time_embedding_type == "positional":
+            self.time_proj = Timesteps(self.hparams.time_embed_dim, self.hparams.flip_sin_to_cos, self.hparams.freq_shift)
+            timestep_input_dim = self.hparams.time_embed_dim
+        elif self.hparams.time_embedding_type == "learned":
+            self.time_proj = nn.Embedding(self.hparams.num_train_timesteps, self.hparams.time_embed_dim)
+            timestep_input_dim = self.hparams.time_embed_dim
+
+        self.time_embedding = TimestepEmbedding(timestep_input_dim, self.hparams.time_embed_dim)
+
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiDDPMPC_Monai")
+
+        
+        group.add_argument("--lr", type=float, default=2e-3)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.0)
+        
+        # Encoder/Decoder params
+        group.add_argument("--scale_input", type=float, default=1.0, help='Scale the input')
+        group.add_argument("--num_samples", type=int, default=2048, help='Number of samples to take from the mesh to start the encoding')
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=256, help='Embedding dimension')
+        group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')        
+        group.add_argument("--stages", type=int, nargs="*", default=[128, 256, 512, 1024], help='Dimension per stage for the encoder')
+        group.add_argument("--num_heads", type=int, nargs="*", default=[16, 16, 16, 16], help='Number of attention heads per transformer block')
+        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[64, 128, 256, 512], help='Hidden dim for the Residual FeedForward layer')
+
+        group.add_argument("--stages_diff", type=int, nargs="*", default=[256, 512, 1024, 2048, 1024, 512, 256, 3], help='Dimension per stage for the diffusion model')
+        group.add_argument("--num_heads_diff", type=int, nargs="*", default=[8, 8, 8, 8, 8], help='Number of attention heads per transformer block')
+        group.add_argument("--feed_forward_hidden_dim_diff", type=int, nargs="*", default=[16, 32, 64, 32, 16], help='Hidden dim for the Residual FeedForward layer')
+        
+
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        group.add_argument("--use_layer_norm", type=int, default=0, help='Use layer norm')
+        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.25, 0.25, 0.25, 0.25], help='Pooling factor')
+        group.add_argument("--pooling_K", type=int, nargs="*", default=[27, 27, 27, 27], help='Number of neighbors to consider during pooling')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[16, 32, 64, 128], help='Hidden dim for the pooling layer')        
+        group.add_argument("--score_pooling", type=int, default=0, help='Use score base pooling')
+        
+        group.add_argument("--num_train_steps", type=int, default=1000, help='Number of training steps for the noise scheduler')
+        group.add_argument("--time_embedding_type", type=str, default='positional', help='Time embedding type', choices=['fourier', 'positional', 'learned'])
+        group.add_argument("--time_embed_dim", type=int, default=128, help='Time embedding dimension')
+        group.add_argument("--flip_sin_to_cos", type=int, default=1, help='Whether to flip sin to cos for Fourier time embedding.')
+        group.add_argument("--freq_shift", type=int, default=0, help='Frequency shift for Fourier time embedding.')
+
+        group.add_argument('--kl_weight', help='Weight for loss function', type=float, default=0.001)
+        
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)  
+        return optimizer
+    
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        return sample_points_from_meshes(x_mesh, Ns, return_normals=return_normals)
+
+    def reparameterize_gaussian(self, mean, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn(std.size()).to(mean)
+        return mean + std * eps
+
+    def gaussian_entropy(self, logvar):
+        const = 0.5 * float(logvar.size(1)) * (1. + np.log(np.pi * 2))
+        ent = 0.5 * logvar.sum(dim=1, keepdim=False) + const
+        return ent
+
+    def compute_loss(self, X, X_hat, z_sigma, z, step="train", sync_dist=False):
+        
+        # H[Q(z|X)]
+        # loss_entropy = -self.gaussian_entropy(logvar=z_sigma).mean()      # (B, )
+        loss_entropy = 0
+
+        # P(z), Prior probability, parameterized by the flow: z -> w.
+        loss_prior = -self.flow.log_prob(inputs=z).mean()
+
+        # Negative ELBO of P(X|z)
+        loss_recons = self.loss_fn(X, X_hat)
+
+        loss = loss_recons + (loss_entropy + loss_prior) * self.hparams.kl_weight
+
+        self.log(f"{step}_loss_entropy", loss_entropy, sync_dist=sync_dist)
+        self.log(f"{step}_loss_prior", loss_prior, sync_dist=sync_dist)
+        self.log(f"{step}_loss_recons", loss_recons, sync_dist=sync_dist)        
+        self.log(f"{step}_loss", loss, sync_dist=sync_dist)        
+
+        return loss
+
+    def training_step(self, train_batch, batch_idx):
+
+        if isinstance(train_batch, tuple):
+            V, F = train_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        elif isinstance(train_batch, dict):
+            X = train_batch['pointcloud']
+        else:
+            X = train_batch
+
+        X = X * self.hparams.scale_input
+        z_mu, z_sigma = self.encoder(X, X)
+        z_mu = z_mu.mean(dim=1)
+        z_sigma = z_sigma.mean(dim=1)
+
+        z = self.reparameterize_gaussian(mean=z_mu, logvar=z_sigma) 
+
+        noise = torch.randn_like(X).to(self.device)
+
+        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+
+        X_hat = self.inferer(inputs=X, diffusion_model=self, noise=noise, timesteps=timesteps, condition=z)
+
+        loss = self.compute_loss(X=noise, X_hat=X_hat, z_sigma=z_sigma, z=z)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        if isinstance(val_batch, tuple):
+            V, F = val_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        elif isinstance(val_batch, dict):
+            X = val_batch['pointcloud']
+        else:
+            X = val_batch
+
+        X = X * self.hparams.scale_input
+        z_mu, z_sigma = self.encoder(X, X)
+        z_mu = z_mu.mean(dim=1)
+        z_sigma = z_sigma.mean(dim=1)
+
+        z = self.reparameterize_gaussian(mean=z_mu, logvar=z_sigma) 
+
+        noise = torch.randn_like(X).to(self.device)
+
+        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+
+        X_hat = self.inferer(inputs=X, diffusion_model=self, noise=noise, timesteps=timesteps, condition=z)
+
+        self.compute_loss(X=noise, X_hat=X_hat, z_sigma=z_sigma, z=z, step="val", sync_dist=True)
+
+    def forward(self, x: torch.tensor, timesteps: Union[torch.Tensor, float, int], context: torch.Tensor | None = None):
+
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=self.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(self.device)
+
+        if timesteps.shape[0] != x.shape[0]:
+            timesteps = timesteps.repeat(x.shape[0])
+
+        t_emb = self.time_proj(timesteps)
+        t_emb = self.time_embedding(t_emb)
+
+        return self.diffnet(x, context=context.unsqueeze(1), time=t_emb.unsqueeze(1))
+
+    def sample(self, num_samples=1, intermediate_steps=None):
+        
+        X = torch.randn(num_samples, self.hparams.num_samples, self.hparams.input_dim).to(self.device)
+
+        self.noise_scheduler.set_timesteps(num_inference_steps=self.hparams.num_train_steps)
+
+        context = self.flow.sample(X.shape[0])
+
+        return self.inferer.sample(
+            input_noise=X, 
+            diffusion_model=self, 
+            scheduler=self.noise_scheduler, 
+            save_intermediates=intermediate_steps is not None, 
+            intermediate_steps=self.hparams.num_train_steps//intermediate_steps if intermediate_steps is not None else None, 
+            verbose=False,
+            conditioning=context
+        )
+    
+
+# import sys
+# sys.path.append('/mnt/raid/C1_ML_Analysis/source/diffusion-point-cloud')
+# from models.diffusion import DiffusionPoint, PointwiseNet, VarianceSchedule
+# from models.flow import CouplingLayer, SequentialFlow
+
+class SaxiFlowVAE(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        # self.encoder = PointNetEncoder(self.hparams.embed_dim, input_dim=self.hparams.input_dim, in_channels=3)
+        self.encoder = monai_nets.EfficientNetBN('efficientnet-b0', spatial_dims=1, num_classes=1280, in_channels=self.hparams.input_dim)
+        self.proj_mu = ProjectionHead(1280, hidden_dim=self.hparams.embed_dim, output_dim=self.hparams.embed_dim, dropout=self.hparams.dropout)
+        self.proj_sigma = ProjectionHead(1280, hidden_dim=self.hparams.embed_dim, output_dim=self.hparams.embed_dim, dropout=self.hparams.dropout)
+        
+        self.flow = SaxiCouplingFlow(
+            features=self.hparams.embed_dim, 
+            num_layers=self.hparams.latent_flow_depth
+        )
+        self.diffusion = ContextModulatedNet(input_dim=self.hparams.input_dim, stages=self.hparams.stages_diff, context_dim=self.hparams.embed_dim + 3)
+
+        self.noise_scheduler =  VarianceSchedule(
+                num_steps=self.hparams.num_train_steps,
+                beta_1=self.hparams.beta_1,
+                beta_T=self.hparams.beta_T,
+                mode=self.hparams.sched_mode
+            )
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiFlowVAE")
+
+        # optimizer and scheduler
+        group.add_argument('--lr', type=float, default=1e-4)
+        group.add_argument('--weight_decay', type=float, default=0.01)
+        # group.add_argument('--max_grad_norm', type=float, default=10)
+        # group.add_argument('--end_lr', type=float, default=1e-4)
+        # group.add_argument('--sched_start_epoch', type=int, default=200*1000)
+        # group.add_argument('--sched_end_epoch', type=int, default=400*1000)
+        
+        group.add_argument("--latent_flow_depth", type=int, default=16, help='Number of coupling layers')
+        group.add_argument('--latent_flow_hidden_dim', type=int, default=256)
+        
+        group.add_argument("--num_samples", type=int, default=2048, help='Number of samples to take from the mesh to start the encoding')
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=1280, help='Embedding dimension')
+        group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')        
+        group.add_argument("--stages", type=int, nargs="*", default=[128, 256, 512, 1024], help='Dimension per stage for the encoder')
+        group.add_argument("--num_heads", type=int, nargs="*", default=[16, 16, 16, 16], help='Number of attention heads per transformer block')
+        group.add_argument("--feed_forward_hidden_dim", type=int, nargs="*", default=[32, 64, 128, 256], help='Hidden dim for the Residual FeedForward layer')
+
+        group.add_argument("--stages_diff", type=int, nargs="*", default=[128, 256, 512, 1024, 512, 256, 128, 3], help='Dimension per stage for the diffusion model')
+        group.add_argument("--num_heads_diff", type=int, nargs="*", default=[8, 8, 8, 8, 8], help='Number of attention heads per transformer block')
+        group.add_argument("--feed_forward_hidden_dim_diff", type=int, nargs="*", default=[16, 32, 64, 32, 16], help='Hidden dim for the Residual FeedForward layer')
+
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        group.add_argument("--use_layer_norm", type=int, default=1, help='Use layer norm')
+        group.add_argument("--pooling_factor", type=float, nargs="*", default=[0.25, 0.25, 0.25, 0.25], help='Pooling factor')
+        group.add_argument("--pooling_K", type=int, nargs="*", default=[27, 27, 27, 27], help='Number of neighbors to consider during pooling')
+        group.add_argument("--pooling_hidden_dim", type=int, nargs="*", default=[16, 32, 64, 128], help='Hidden dim for the pooling layer')        
+        group.add_argument("--score_pooling", type=int, default=0, help='Use score base pooling')
+
+        group.add_argument("--num_train_steps", type=int, default=1000, help='Number of training steps for the noise scheduler')
+        group.add_argument('--beta_1', type=float, default=1e-4)
+        group.add_argument('--beta_T', type=float, default=0.02)
+        group.add_argument('--sched_mode', type=str, default='linear')
+
+        group.add_argument('--kl_weight', type=float, default=0.0001)
+        group.add_argument('--truncate_std', type=float, default=2.0)
+        group.add_argument('--flexibility', type=float, default=0.0)
+        
+        # group.add_argument('--latent_dim', type=int, default=256)
+        # group.add_argument('--num_steps', type=int, default=100)
+        # group.add_argument('--beta_1', type=float, default=1e-4)
+        # group.add_argument('--beta_T', type=float, default=0.02)
+        # group.add_argument('--sched_mode', type=str, default='linear')
+        # group.add_argument('--latent_flow_depth', type=int, default=14)
+        # group.add_argument('--latent_flow_hidden_dim', type=int, default=256)
+        # group.add_argument('--num_samples', type=int, default=4)
+        # group.add_argument('--sample_num_points', type=int, default=2048)
+        # group.add_argument('--residual', type=eval, default=True, choices=[True, False])
+        # group.add_argument('--spectral_norm', type=eval, default=False, choices=[True, False])
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)  
+
+        # scheduler = self.get_linear_scheduler(optimizer, self.hparams.sched_start_epoch, self.hparams.sched_end_epoch, self.hparams.lr, self.hparams.end_lr)
+
+
+
+        # return {"optimizer": optimizer, "lr_scheduler": scheduler}
+        return optimizer
+
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        x = sample_points_from_meshes(x_mesh, Ns, return_normals=return_normals)
+        idx = torch.argsort(x[:, :, -1], dim=1)
+        x = x.gather(1, idx.unsqueeze(-1).expand_as(x))
+        return x
+
+    def reparameterize_gaussian(self, mean, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn(std.size()).to(mean)
+        return mean + std * eps
+
+    def gaussian_entropy(self, logvar):
+        const = 0.5 * float(logvar.size(1)) * (1. + np.log(np.pi * 2))
+        ent = 0.5 * logvar.sum(dim=1, keepdim=False) + const
+        return ent
+
+    def standard_normal_logprob(self, z):
+        dim = z.size(-1)
+        log_z = -0.5 * dim * np.log(2 * np.pi)
+        return log_z - z.pow(2) / 2
+
+    def compute_loss(self, x, step='train', sync_dist=False):
+        """
+        Args:
+            x:  Input point clouds, (B, N, d).
+        """
+        batch_size, _, _ = x.size()
+        
+        h = self.encoder(x.permute(0, 2, 1))
+        z_mu = self.proj_mu(h)
+        z_sigma = self.proj_sigma(h)
+        
+        # z_mu, z_sigma = self.encoder(x, x)
+        # z_mu = z_mu.mean(dim=1)
+        # z_sigma = z_sigma.mean(dim=1)
+        
+        z = self.reparameterize_gaussian(mean=z_mu, logvar=z_sigma)  # (B, F)
+        
+        # H[Q(z|X)]
+        entropy = self.gaussian_entropy(logvar=z_sigma)      # (B, )
+        loss_entropy = -entropy.mean()
+        # loss_entropy = 0.0
+
+        # P(z), Prior probability, parameterized by the flow: z -> w.
+        
+        # w, delta_log_pw = self.flow(z, torch.zeros([batch_size, 1]).to(z), reverse=False)
+        # log_pw = self.standard_normal_logprob(w).view(batch_size, -1).sum(dim=1, keepdim=True)   # (B, 1)
+        # log_pz = log_pw - delta_log_pw.view(batch_size, 1)  # (B, 1)
+        # loss_prior = -log_pz.mean()
+
+        loss_prior = -self.flow.log_prob(inputs=z).mean()
+
+        # Negative ELBO of P(X|z)
+        noise = torch.randn_like(x)
+        x_noisy, beta = self.noise_scheduler.add_noise(x, noise=noise)
+        x_pred = self.diffusion(x_noisy, beta=beta, context=z)
+        loss_recons = F.mse_loss(x_pred, noise, reduction='mean')
+
+        # neg_elbo = self.diffusion.get_loss(x, z)
+        # loss_recons = neg_elbo
+
+        # Loss
+        
+        loss = self.hparams.kl_weight*(loss_entropy + loss_prior) + loss_recons
+
+        self.log(f"{step}_loss", loss, sync_dist=sync_dist)
+        self.log(f"{step}_loss_prior", loss_prior, sync_dist=sync_dist)
+        self.log(f"{step}_loss_recons", loss_recons, sync_dist=sync_dist)
+        self.log(f"{step}_z_mean", z_mu.mean(), sync_dist=sync_dist)
+        self.log(f"{step}_z_mag", z_mu.abs().max(), sync_dist=sync_dist)
+        self.log(f"{step}_z_var", (0.5*z_sigma).exp().mean(), sync_dist=sync_dist)
+        # self.log(f"{step}_x_pred_mean", x_pred.mean(), sync_dist=sync_dist)
+        # self.log(f"{step}_x_pred_std", x_pred.std(), sync_dist=sync_dist)
+
+        return loss
+
+        
+
+    def training_step(self, train_batch, batch_idx):
+        
+        if isinstance(train_batch, tuple) or isinstance(train_batch, list):
+            V, F = train_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        elif isinstance(train_batch, dict):
+            X = train_batch['pointcloud']
+        else:
+            X = train_batch
+        
+        loss = self.compute_loss(X)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        if isinstance(val_batch, tuple) or isinstance(val_batch, list):
+            V, F = val_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+        elif isinstance(val_batch, dict):
+            X = val_batch['pointcloud']
+        else:
+            X = val_batch
+        
+        loss = self.compute_loss(X, step="val", sync_dist=True)
+        
+
+    def forward(self, x):        
+        return self.encoder(x)
+
+    def truncated_normal_(self, tensor, mean=0, std=1, trunc_std=2):
+        """
+        Taken from https://discuss.pytorch.org/t/implementing-truncated-normal-initializer/4778/15
+        """
+        size = tensor.shape
+        tmp = tensor.new_empty(size + (4,)).normal_()
+        valid = (tmp < trunc_std) & (tmp > -trunc_std)
+        ind = valid.max(-1, keepdim=True)[1]
+        tensor.data.copy_(tmp.gather(-1, ind).squeeze(-1))
+        tensor.data.mul_(std).add_(mean)
+        return tensor
+
+    def sample(self, num_samples=1, intermediate_steps=0):
+
+        # w = torch.randn([num_samples, self.hparams.embed_dim]).to(self.device)
+
+        
+        noise = torch.randn([num_samples, self.hparams.num_samples, 3]).to(self.device)
+        # if self.hparams.truncate_std is not None:
+        #     noise = self.truncated_normal_(noise, mean=0, std=1, trunc_std=self.hparams.truncate_std)
+        
+        # # Reverse: z <- w.
+        # # z = self.flow(w, reverse=True).view(num_samples, -1)
+        # z = self.flow.sample(num_samples)
+        # return self.noise_scheduler.sample(context=z, flexibility=self.hparams.flexibility, intermediate_steps=intermediate_steps, net=self.diffusion, noise=noise)
+
+        # batch_size, _ = w.size()
+        # if self.hparams.truncate_std is not None:
+        #     w = self.truncated_normal_(w, mean=0, std=1, trunc_std=self.hparams.truncate_std)
+        # # Reverse: z <- w.
+        # z = self.flow(w, reverse=True).view(num_samples, -1)
+        
+        z = self.flow.sample(num_samples)
+        return self.noise_scheduler.sample(context=z, flexibility=self.hparams.flexibility, intermediate_steps=intermediate_steps, net=self.diffusion, noise=noise)
+        # return self.diffusion.sample(self.hparams.num_samples, context=z, flexibility=self.hparams.flexibility, ret_traj=False, intermediate_steps=intermediate_steps)
+
+
+
+
+
+
+class SaxiDDPMPCUNet(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = monai_nets.EfficientNetBN('efficientnet-b0', 
+            pretrained=False, 
+            spatial_dims=2, 
+            in_channels=self.hparams.input_dim, 
+            num_classes=self.hparams.embed_dim*2)
+
+        self.proj_mu = ProjectionHead(self.hparams.embed_dim*2, hidden_dim=self.hparams.embed_dim, output_dim=self.hparams.embed_dim, dropout=self.hparams.dropout)
+        self.proj_sigma = ProjectionHead(self.hparams.embed_dim*2, hidden_dim=self.hparams.embed_dim, output_dim=self.hparams.embed_dim, dropout=self.hparams.dropout)
+
+        self.flow = SaxiCouplingFlow(
+            features=self.hparams.embed_dim, 
+            num_layers=14
+        )
+
+        self.diffnet = UNet2DConditionModel(
+            in_channels=self.hparams.input_dim, 
+            out_channels=self.hparams.input_dim, 
+            cross_attention_dim=self.hparams.embed_dim, 
+            flip_sin_to_cos=self.hparams.flip_sin_to_cos,
+            time_embedding_type=self.hparams.time_embedding_type,
+            freq_shift=self.hparams.freq_shift)
+        
+
+        self.loss_fn = nn.MSELoss()
+
+        self.noise_scheduler = DDPMScheduler(num_train_timesteps=self.hparams.num_train_steps, 
+                                             beta_schedule="linear",
+                                             clip_sample=False,
+                                             prediction_type='epsilon')
+        
+        self.sorter = HilbertSort3D(origin=torch.zeros(3), radius=self.hparams.hilbert_radius, bins=self.hparams.hilbert_bins)
+    
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("SaxiDDPMPCUNet")
+
+        group.add_argument("--lr", type=float, default=2e-6)
+        group.add_argument('--weight_decay', help='Weight decay for optimizer', type=float, default=0.0001)
+        
+        # Encoder params
+        group.add_argument("--num_samples", type=int, default=4096, help='Number of samples to take from the mesh to start the encoding')
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the encoder')
+        group.add_argument("--embed_dim", type=int, default=512, help='Embedding dimension')
+        group.add_argument("--output_dim", type=int, default=3, help='Output dimension of the model')
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+        
+        group.add_argument("--num_train_steps", type=int, default=1000, help='Number of training steps for the noise scheduler')
+        group.add_argument("--time_embedding_type", type=str, default='positional', help='Time embedding type', choices=['fourier', 'positional'])
+        
+        group.add_argument("--flip_sin_to_cos", type=int, default=1, help='Whether to flip sin to cos for Fourier time embedding.')
+        group.add_argument("--freq_shift", type=int, default=0, help='Frequency shift for Fourier time embedding.')
+
+        group.add_argument('--kl_weight', help='Weight for loss function', type=float, default=0.001)
+
+        group.add_argument('--hilbert_radius', help='Weight for loss function', type=int, default=1.25)
+        group.add_argument('--hilbert_bins', help='Weight for loss function', type=int, default=64)
+
+        return parent_parser
+    
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(),
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.weight_decay)        
+        return optimizer
+    
+    def create_mesh(self, V, F):
+        return Meshes(verts=V, faces=F)
+    
+    def sample_points_from_meshes(self, x_mesh, Ns, return_normals=False):
+        return sample_points_from_meshes(x_mesh, Ns, return_normals=return_normals)
+
+    def reparameterize_gaussian(self, mean, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn(std.size()).to(mean)
+        return mean + std * eps
+
+    def gaussian_entropy(self, logvar):
+        const = 0.5 * float(logvar.size(1)) * (1. + np.log(np.pi * 2))
+        ent = 0.5 * logvar.sum(dim=1, keepdim=False) + const
+        return ent
+
+    def compute_loss(self, X, X_hat, z_sigma, z, step="train", sync_dist=False):
+        
+        # H[Q(z|X)]
+        # loss_entropy = 0
+        loss_entropy = -self.gaussian_entropy(logvar=z_sigma).mean()      # (B, )
+
+        # P(z), Prior probability, parameterized by the flow: z -> w.
+        loss_prior = -self.flow.log_prob(inputs=z).mean()
+
+        # Negative ELBO of P(X|z)
+        loss_recons = self.loss_fn(X, X_hat)
+
+        loss = loss_recons + (loss_entropy + loss_prior) * self.hparams.kl_weight
+
+        # self.log(f"{step}_loss_entropy", loss_entropy, sync_dist=sync_dist)
+        self.log(f"{step}_loss_prior", loss_prior, sync_dist=sync_dist)
+        self.log(f"{step}_loss_recons", loss_recons, sync_dist=sync_dist)        
+        self.log(f"{step}_loss", loss, sync_dist=sync_dist)
+        
+        self.log(f"{step}_z_var", (0.5*z_sigma).exp().mean(), sync_dist=sync_dist)
+        self.log(f"{step}_x_hat_mean", X_hat.mean(), sync_dist=sync_dist)
+        self.log(f"{step}_x_hat_std", X_hat.std(), sync_dist=sync_dist)
+
+        return loss
+
+    def encode(self, X):
+        h = self.encoder(X.permute(0, 2, 1).view(-1, 3, 64, 64).contiguous())
+        z_mu = self.proj_mu(h)
+        z_sigma = self.proj_sigma(h)
+        z = self.reparameterize_gaussian(mean=z_mu, logvar=z_sigma) 
+        return z, z_mu, z_sigma
+
+    def training_step(self, train_batch, batch_idx):
+        
+        if isinstance(train_batch, tuple) or isinstance(train_batch, list):
+            V, F = train_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+            X = self.sorter(X)
+        elif isinstance(train_batch, dict):
+            X = train_batch['pointcloud']
+        else:
+            X = train_batch
+        
+        z, z_mu, z_sigma = self.encode(X)
+
+        noise = torch.randn_like(X).to(self.device)
+
+        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+
+        noisy_X = self.noise_scheduler.add_noise(X, noise=noise, timesteps=timesteps)
+
+        X_hat = self(noisy_X.permute(0, 2, 1).view(-1, 3, 64, 64).contiguous(), timesteps=timesteps, context=z.unsqueeze(1))
+        X_hat = X_hat.view(-1, 3, 64*64).permute(0, 2, 1).contiguous()
+
+        loss = self.compute_loss(X=noise, X_hat=X_hat, z_sigma=z_sigma, z=z)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+        
+        if isinstance(val_batch, tuple) or isinstance(val_batch, list):
+            V, F = val_batch        
+            X_mesh = self.create_mesh(V, F)
+            X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
+            X = self.sorter(X)
+        elif isinstance(val_batch, dict):
+            X = val_batch['pointcloud']
+        else:
+            X = val_batch
+        
+        z, z_mu, z_sigma = self.encode(X)
+
+        noise = torch.randn_like(X).to(self.device)
+
+        timesteps = torch.randint(0, self.hparams.num_train_steps - 1, (X.shape[0],)).long().to(self.device)
+
+        noisy_X = self.noise_scheduler.add_noise(X, noise=noise, timesteps=timesteps)
+        
+        X_hat = self(noisy_X.permute(0, 2, 1).view(-1, 3, 64, 64).contiguous(), timesteps=timesteps, context=z.unsqueeze(1))
+        X_hat = X_hat.view(-1, 3, 64*64).permute(0, 2, 1).contiguous()
+
+        loss = self.compute_loss(X=noise, X_hat=X_hat, z_sigma=z_sigma, z=z, step="val", sync_dist=True)
+
+    def forward(self, x: torch.tensor, timesteps: Union[torch.Tensor, float, int], context: torch.Tensor | None = None):
+
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=self.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(self.device)
+
+        if timesteps.shape[0] != x.shape[0]:
+            timesteps = timesteps.repeat(x.shape[0])
+            
+        return self.diffnet(sample=x, timestep=timesteps, encoder_hidden_states=context).sample
+
+    def sample(self, num_samples=1, intermediate_steps=None, z=None):
+        intermediates = []
+        if intermediate_steps is None:
+            num_diff_steps = self.hparams.num_train_steps
+        else:
+            num_diff_steps = int(self.hparams.num_train_steps/intermediate_steps)
+
+        if z is None:
+            z = self.flow.sample(num_samples) 
+
+        X_t = torch.randn(z.shape[0], self.hparams.num_samples, self.hparams.input_dim).to(self.device)
+
+        for i, t in enumerate(self.noise_scheduler.timesteps):
+
+            
+            x_hat = self(X_t.permute(0, 2, 1).view(-1, 3, 64, 64).contiguous(), timesteps=t, context=z.unsqueeze(1))  
+            x_hat = x_hat.view(-1, 3, 64*64).permute(0, 2, 1).contiguous()
+
+            # Update sample with step
+            X_t = self.noise_scheduler.step(model_output=x_hat, timestep=t, sample=X_t).prev_sample
+            # X_t = X_t.clone().detach()
+            if intermediate_steps is not None and intermediate_steps > 0 and t % (self.hparams.num_train_steps//intermediate_steps) == 0:
+                intermediates.append(X_t)
+
+        return X_t, intermediates

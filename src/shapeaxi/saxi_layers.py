@@ -1,6 +1,14 @@
 import torch
-from torch import nn
+from torch import nn, Tensor
+from torchvision.ops.misc import ConvNormActivation
+from torchvision.ops import StochasticDepth
+from torchvision.models._utils import _make_divisible
+
 from pytorch3d.ops import knn_points, knn_gather, sample_farthest_points
+from dataclasses import dataclass
+import math
+
+from typing import List, Tuple, Union, Callable, Optional
 
 # This file contains the definition of the IcosahedronConv2d, IcosahedronConv1d and IcosahedronLinear classes, which are used to perform convolution and linear operations on icosahedral meshes
 
@@ -355,20 +363,22 @@ class Norm(nn.Module):
 
 class ProjectionHead(nn.Module):
     # Projection MLP
-    def __init__(self, input_dim=1280, hidden_dim=1280, output_dim=128, dropout=0.1):
+    def __init__(self, input_dim=1280, hidden_dim=1280, output_dim=128, dropout=0.1, activation=nn.ReLU, bias=False):   
         super().__init__()
         self.output_dim = output_dim
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
 
         self.model = nn.Sequential(
-            nn.Linear(self.input_dim, self.hidden_dim, bias=False),
-            nn.GELU(),
+            nn.Linear(self.input_dim, self.hidden_dim, bias=bias),
+            activation(),
             nn.Dropout(dropout),
-            nn.Linear(self.hidden_dim, self.output_dim, bias=False),
+            nn.Linear(self.hidden_dim, self.output_dim, bias=bias),
         )
 
-    def forward(self, x):
+    def forward(self, x, x_=None):
+        if x_ is not None:
+            x = torch.cat([x, x_], dim=-1)
         x = self.model(x)
         return x
 
@@ -493,6 +503,33 @@ class MHA_KNN(nn.Module):
             return x, x_w
         return x
 
+class KNN_Idx(nn.Module):
+    def __init__(self, K=6, return_sorted=True):
+        super(KNN_Idx, self).__init__()
+        self.K = K
+        self.return_sorted = return_sorted
+
+    def forward(self, x, x_v):
+        batch_size, V_n, Embed_dim = x.shape
+
+        dists_idx = None
+        K = self.K
+        if isinstance(self.K, tuple):
+            K = self.K[0]
+            K_farthest = self.K[1]
+            dists = knn_points(x_v, x_v, K=K, return_sorted=self.return_sorted) # The idx is of shape [BS, V_n, K]
+
+            _, selected_indices = sample_farthest_points(x_v, K=K_farthest) # The idx is of shape [BS, K]
+            selected_indices = selected_indices.unsqueeze(1).expand(-1, V_n, -1) # The idx is of shape [BS, V_n, K]
+            dists_idx = torch.cat((dists.idx, selected_indices), dim=2)
+
+            K = K + K_farthest
+        else:            
+            dists = knn_points(x_v, x_v, K=self.K, return_sorted=self.return_sorted)
+            dists_idx = dists.idx
+
+        return dists_idx
+
 class MHA_KNN_V(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.1, return_weights=False, K=6, return_sorted=True, use_direction=True):
         super(MHA_KNN_V, self).__init__()
@@ -504,32 +541,92 @@ class MHA_KNN_V(nn.Module):
         self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)        
         self.use_direction = use_direction
     
-    def forward(self, x, x_v, x_v_fixed=None):
+    def forward(self, x, x_v):
 
         batch_size, V_n, Embed_dim = x.shape
-        
-        #input shape of x is [BS, V_n, Embed_dim]
-        if x_v_fixed is None:
-            x_v_fixed = x_v
 
         dists_idx = None
         K = self.K
         if isinstance(self.K, tuple):
             K = self.K[0]
             K_farthest = self.K[1]
-            dists = knn_points(x_v_fixed, x_v, K=K, return_sorted=self.return_sorted) # The idx is of shape [BS, V_n, K]
+            dists = knn_points(x_v, x_v, K=K, return_sorted=self.return_sorted) # The idx is of shape [BS, V_n, K]
 
-            _, selected_indices = sample_farthest_points(x_v, K=K_farthest) # The idx is of shape [BS, K]
-            selected_indices = selected_indices.unsqueeze(1).expand(-1, V_n, -1) # The idx is of shape [BS, V_n, K]
-            dists_idx = torch.cat((dists.idx, selected_indices), dim=2)
+            x_v_farthest, selected_indices = sample_farthest_points(x_v, K=K_farthest) # Sample the farthest points selected_indices has shape [BS, K_farthest] x_v_farthest has shape [BS, K_farthest, 3]
+            
+            selected_indices = selected_indices.unsqueeze(1).expand(-1, V_n, -1) # Expand the farthest points to all the points in the point cloud [BS, V_n, K_farthest]
+            x_v_farthest = x_v_farthest.unsqueeze(1).expand(-1, V_n, -1, -1) # Expand the farthest points to all the points in the point cloud [BS, V_n, K_farthest, 3]
+
+            distances = torch.cdist(x_v_farthest, x_v.unsqueeze(2), p=2).squeeze(-1) # Compute the distances between the farthest points and all the points in the point cloud [BS, V_n, K_farthest]
+            sorted_indices = torch.argsort(distances, dim=-1) # Sort the distances to get the closest points to the farthest points [BS, V_n, K_farthest]
+
+            selected_indices = torch.gather(selected_indices, 2, sorted_indices) # Use the sorted indices to get the closest points to the farthest points [BS, V_n, K_farthest]
+            
+            dists_idx = torch.cat((dists.idx, selected_indices), dim=2) 
 
             K = K + K_farthest
         else:            
-            dists = knn_points(x_v_fixed, x_v, K=self.K, return_sorted=self.return_sorted)
+            dists = knn_points(x_v, x_v, K=self.K, return_sorted=self.return_sorted)
             dists_idx = dists.idx
+        
         # compute the key, the input shape is [BS, V_n, K, Embed_dim], it has the closest K points to the query. i.e, find the closest K points to each point in the point cloud
         k = knn_gather(x, dists_idx)
 
+        
+        # the query is the input point itself, the shape of q is [BS, V_n, 1, Embed_dim]
+        q = x.unsqueeze(-2)
+
+        if self.use_direction:
+            #the value tensor contains the directions towards the closest points. 
+            # the intuition here is that based on the query and key embeddings, the model will learn to predict
+            # the best direction to move the new embedding, i.e., create a new point in the point cloud
+            # the shape of v is [BS, V_n, K, Embed_dim]
+
+            v = k - q
+        else:
+            v = k
+
+        q = q.contiguous().view(batch_size * V_n, 1, Embed_dim) # Original point with dimension 1 added
+        k = k.contiguous().view(batch_size * V_n, K, Embed_dim)
+        v = v.contiguous().view(batch_size * V_n, K, Embed_dim)        
+
+        v, x_w = self.attention(q, k, v)
+
+        v = v.contiguous().view(batch_size, V_n, Embed_dim)
+        # x_w = x_w.contiguous().view(batch_size, V_n, K)
+        
+        # Based on the weights of the attention layer, we compute the new position of the points
+        # Shape of x_w is [BS, V_n, K] and k_v (x_v after knn_gather) is [BS, V_n, K, 3]
+
+        # x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_add_(1, dists.idx.view(batch_size, -1), x_w.view(batch_size, -1))
+        # x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_reduce_(dim=1, index=dists_idx.view(batch_size, -1), src=x_w.view(batch_size, -1), reduce="mean")
+        # x_w = x_w.unsqueeze(-1)
+        
+        # The new predicted point is the sum of the input point and the weighted sum of the directions
+        if self.use_direction:
+            x = x + v
+        else:
+            x = v
+
+        if self.return_weights:
+            return x, x_w
+        return x
+
+class MHA_Idx(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, use_direction=True):
+        super(MHA_Idx, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
+        self.use_direction = use_direction
+    
+    def forward(self, x, idx):
+
+        batch_size, V_n, Embed_dim = x.shape
+        K = idx.shape[-1]
+        
+        k = knn_gather(x, idx)
+        
         #the value tensor contains the directions towards the closest points. 
         # the intuition here is that based on the query and key embeddings, the model will learn to predict
         # the best direction to move the new embedding, i.e., create a new point in the point cloud
@@ -550,14 +647,10 @@ class MHA_KNN_V(nn.Module):
         v, x_w = self.attention(q, k, v)
 
         v = v.contiguous().view(batch_size, V_n, Embed_dim)
-        x_w = x_w.contiguous().view(batch_size, V_n, K)
+        # x_w = x_w.contiguous().view(batch_size, V_n, K)
         
         # Based on the weights of the attention layer, we compute the new position of the points
         # Shape of x_w is [BS, V_n, K] and k_v (x_v after knn_gather) is [BS, V_n, K, 3]
-
-        # x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_add_(1, dists.idx.view(batch_size, -1), x_w.view(batch_size, -1))
-        x_w = torch.zeros(batch_size, V_n, device=x.device).scatter_reduce_(dim=1, index=dists_idx.view(batch_size, -1), src=x_w.view(batch_size, -1), reduce="mean")
-        x_w = x_w.unsqueeze(-1)
         
         # The new predicted point is the sum of the input point and the weighted sum of the directions
         if self.use_direction:
@@ -565,18 +658,16 @@ class MHA_KNN_V(nn.Module):
         else:
             x = v
 
-        if self.return_weights:
-            return x, x_w
         return x
     
-class KNN_Embedding_V(nn.Module):
-    def __init__(self, input_dim, embed_dim, K=27, return_sorted=True):
-        super(KNN_Embedding_V, self).__init__()
+class KNN_V(nn.Module):
+    def __init__(self, input_dim, output_dim, K=27, return_sorted=True):
+        super(KNN_V, self).__init__()
         self.input_dim = input_dim
         self.K = K
         self.return_sorted = return_sorted
 
-        self.module = nn.Linear(self.input_dim*self.K, embed_dim)
+        self.module = ProjectionHead(self.input_dim*self.K, hidden_dim=input_dim, output_dim=output_dim)
     
     def forward(self, x, x_v):
         
@@ -603,11 +694,11 @@ class Residual(nn.Module):
         return x + x_out
 
 class FeedForward(nn.Module):
-    def __init__(self, embed_dim: int, hidden_dim: int, dropout: float = 0.1):
+    def __init__(self, embed_dim: int, hidden_dim: int, dropout: float = 0.1, activation=nn.ReLU):
         super(FeedForward, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim, bias=False),
-            nn.GELU(),
+            activation(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, embed_dim, bias=False),
         )
@@ -766,17 +857,9 @@ class AttentionPooling_V(nn.Module):
 
         return x, indices
 
-    def get_pooling_idx(self, x_s, x_v, pf, K, x_v_fixed=None):
+    def get_pooling_idx(self, x_s, x_v, pf, K):
 
-        # Find next level points
-        if x_v_fixed is not None:
-            n_samples = int(x_s.shape[1]*pf)
-            x_v_fixed = x_v_fixed[:, :n_samples]
-
-            dist = knn_points(x_v_fixed, x_v, K=1)
-            x_v_next = knn_gather(x_v, dist.idx).squeeze(2)
-        
-        elif self.score_pooling:
+        if self.score_pooling:
             n_samples = int(x_s.shape[1]*pf)
             x_idx_next = torch.argsort(x_s, descending=True, dim=1)[:,:n_samples]
             x_v_next = knn_gather(x_v, x_idx_next).squeeze(2)
@@ -791,17 +874,16 @@ class AttentionPooling_V(nn.Module):
 
         pooling_idx = pooling.idx
         unpooling_idx = unpooling.idx
-
         
-        return pooling_idx, unpooling_idx, x_v_next, x_v_fixed
+        return pooling_idx, unpooling_idx, x_v_next
         
     
-    def forward(self, x, x_v, x_v_fixed=None):
+    def forward(self, x, x_v):
 
         # find closest points to self, i.e., each point in the sample finds the closest K points in the sample
         x_s = self.Sigmoid(self.V(self.Tanh(self.W1(x))))
         
-        pooling_idx, unpooling_idx, x_v, x_v_fixed = self.get_pooling_idx(x_s, x_v, pf=self.pooling_factor, K=self.K, x_v_fixed=x_v_fixed)
+        pooling_idx, unpooling_idx, x_v = self.get_pooling_idx(x_s, x_v, pf=self.pooling_factor, K=self.K)
         
         x = knn_gather(x, pooling_idx)
         score = knn_gather(x_s, pooling_idx)
@@ -810,9 +892,6 @@ class AttentionPooling_V(nn.Module):
 
         x = attention_weights * x
         x = torch.sum(x, dim=2)
-
-        if x_v_fixed is not None:
-            return x, x_v, x_s, pooling_idx, unpooling_idx, x_v_fixed
         
         return x, x_v, x_s, pooling_idx, unpooling_idx
     
@@ -895,54 +974,6 @@ class SmoothMHA(nn.Module):
 
         return x
     
-class MHA_Idx(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, use_direction=True):
-        super(MHA_Idx, self).__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
-        self.use_direction = use_direction
-    
-    def forward(self, x, idx):
-
-        batch_size, V_n, Embed_dim = x.shape
-        K = idx.shape[-1]
-        
-        k = knn_gather(x, idx)
-        
-        #the value tensor contains the directions towards the closest points. 
-        # the intuition here is that based on the query and key embeddings, the model will learn to predict
-        # the best direction to move the new embedding, i.e., create a new point in the point cloud
-        # the shape of v is [BS, V_n, K, Embed_dim]
-
-        # the query is the input point itself, the shape of q is [BS, V_n, 1, Embed_dim]
-        q = x.unsqueeze(-2)
-
-        if self.use_direction:
-            v = k - q
-        else:
-            v = k
-
-        q = q.contiguous().view(batch_size * V_n, 1, Embed_dim) # Original point with dimension 1 added
-        k = k.contiguous().view(batch_size * V_n, K, Embed_dim)
-        v = v.contiguous().view(batch_size * V_n, K, Embed_dim)        
-
-        v, x_w = self.attention(q, k, v)
-
-        v = v.contiguous().view(batch_size, V_n, Embed_dim)
-        # x_w = x_w.contiguous().view(batch_size, V_n, K)
-        
-        # Based on the weights of the attention layer, we compute the new position of the points
-        # Shape of x_w is [BS, V_n, K] and k_v (x_v after knn_gather) is [BS, V_n, K, 3]
-        
-        # The new predicted point is the sum of the input point and the weighted sum of the directions
-        if self.use_direction:
-            x = x + v
-        else:
-            x = v
-
-        return x
-    
 class AttentionChunk(nn.Module):
     def __init__(self, input_dim, hidden_dim, chunks=16, permute_time_dim=True):
         super().__init__()
@@ -972,3 +1003,100 @@ class AttentionChunk(nn.Module):
         if self.permute_time_dim:
             x_out = x_out.permute(0, 2, 1, 3, 4)
         return x_out
+
+class ConvBlockIdx(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding='same', bias=False):
+        super(ConvBlockIdx, self).__init__()
+        
+        self.out_channels = out_channels
+
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, 
+                              stride=stride, padding=padding, bias=bias)
+        self.norm = nn.LayerNorm(out_channels)
+        self.gelu = nn.GELU()
+        
+    def forward(self, x, idx):
+
+        x = knn_gather(x, idx) # [BS, V_n, K, F]
+        batch_size, V_n, K, Embed_dim = x.shape
+
+        x = x.view(-1, K, Embed_dim).contiguous()
+        x = x.permute(0, 2, 1).contiguous()
+        
+        x = self.conv(x)
+        
+        x = x.permute(0, 2, 1).contiguous()
+        x = x.view(batch_size, V_n, -1, self.out_channels).contiguous()
+        x = x.mean(dim=2)
+        
+        x = self.norm(x)
+        x = self.gelu(x)
+
+        return x
+
+class ConvBlock_V(nn.Module):
+    def __init__(self, in_channels, out_channels, K=27, kernel_size=3, stride=1, padding='same', bias=False, return_sorted=True):
+        super(ConvBlock_V, self).__init__()
+        
+        self.idx = KNN_Idx(K=K, return_sorted=return_sorted)
+        
+        self.conv = ConvBlockIdx(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=bias)
+
+    def forward(self, x, x_v):
+        
+        idx = self.idx(x, x_v)
+        x = self.conv(x, idx)
+        
+        return x
+
+class ContextModulated(nn.Module):
+    def __init__(self, input_dim, output_dim, context_dim, activation=nn.LeakyReLU):
+        super(ContextModulated, self).__init__()
+
+        self.fc = nn.Linear(input_dim, output_dim)
+        
+        self.hyper_gate = nn.Linear(context_dim, output_dim)
+        self.hyper_bias = nn.Linear(context_dim, output_dim, bias=False)
+        self.sigmoid = nn.Sigmoid()
+        if activation is not None:
+            self.activation = activation()
+        else:
+            self.activation = nn.Identity()
+
+    def forward(self, x, context):
+        
+        
+        gate = self.sigmoid(self.hyper_gate(context))
+        bias = self.hyper_bias(context)        
+        
+        return self.activation(self.fc(x)*gate + bias)    
+
+
+class BatchNorm1D(nn.Module):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
+        super(BatchNorm1D, self).__init__()
+        self.bn = nn.BatchNorm1d(num_features, eps=eps, momentum=momentum, affine=affine, track_running_stats=track_running_stats)
+    
+    def forward(self, x):
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.bn(x)
+        x = x.permute(0, 2, 1).contiguous()
+        return x
+
+class MHAContextModulated(nn.Module):
+    def __init__(self, embed_dim, num_heads, output_dim, dropout=0.1, return_weights=False):
+        super(MHAContextModulated, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.return_weights = return_weights
+        self.attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, bias=False, batch_first=True)
+        self.context_modulated = ContextModulated(input_dim=embed_dim, output_dim=output_dim, context_dim=embed_dim)
+    
+    def forward(self, x):
+        
+        context, attn_output_weights = self.attention(x, x, x)
+        x = self.context_modulated(x, context)
+        
+        if self.return_weights:
+            return x, attn_output_weights
+        return x

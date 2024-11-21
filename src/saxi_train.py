@@ -13,7 +13,7 @@ from sklearn.utils import class_weight
 
 import lightning as L
 
-from lightning import Trainer
+from lightning import Trainer, seed_everything
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.strategies import DDPStrategy
@@ -75,12 +75,16 @@ def list_transforms(args):
 
 def Saxi_train(args, callbacks):
 
-    train_transform, val_and_test_transform = list_transforms(args)
+    # train_transform, val_and_test_transform = list_transforms(args)
 
     # if args.freesurfer != 0:
     #     print("Freesurfer")
     #     data = SaxiFreesurferDataModule(args.batch_size,train,val,test,train_transform=train_transform,val_and_test_transform=val_and_test_transform,num_workers=args.num_workers,name_class=args.class_column,freesurfer_path=args.fs_path)
 
+    deterministic = None
+    if args.seed_everything:
+        seed_everything(args.seed_everything, workers=True)
+        deterministic = True
 
     DATAMODULE = getattr(saxi_dataset, args.data_module)
 
@@ -141,7 +145,15 @@ def Saxi_train(args, callbacks):
         image_logger = LOGGER(log_steps=args.log_steps)
         callbacks.append(image_logger)
 
-    trainer = Trainer(logger=logger_neptune,max_epochs=args.epochs, log_every_n_steps=args.log_every_n_steps,callbacks=callbacks,devices=torch.cuda.device_count(), accelerator="gpu", strategy=DDPStrategy(find_unused_parameters=False),num_sanity_val_steps=0)
+    trainer = Trainer(logger=logger_neptune, 
+        max_epochs=args.epochs, 
+        log_every_n_steps=args.log_every_n_steps,
+        callbacks=callbacks,devices=torch.cuda.device_count(), 
+        accelerator="gpu", 
+        strategy=DDPStrategy(find_unused_parameters=False),
+        num_sanity_val_steps=0,
+        gradient_clip_val=args.gradient_clip_val,
+        deterministic=deterministic)
     trainer.fit(model, datamodule=data, ckpt_path=args.model)
 
 def main(args):
@@ -172,9 +184,11 @@ def get_argparse():
     hparams_group.add_argument('--epochs', help='Max number of epochs', type=int, default=200)
     hparams_group.add_argument('--patience', help='Max number of patience for early stopping', type=int, default=30)
     hparams_group.add_argument('--steps', help='Max number of steps per epoch', type=int, default=-1)
-
+    hparams_group.add_argument('--gradient_clip_val', help='Gradient clipping for the trainer', type=float, default=None)
+    hparams_group.add_argument('--seed_everything', help='Seed everything for training', type=int, default=None)
+    
     input_group = parser.add_argument_group('Input')
-    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V', 'SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet'])
+    input_group.add_argument('--nn', help='Neural network name', required=True, type=str, choices=['SaxiClassification', 'SaxiRegression', 'SaxiSegmentation', 'SaxiIcoClassification', 'SaxiIcoClassification_fs', 'SaxiRing', 'SaxiRingClassification', 'SaxiRingMT', 'SaxiMHA', 'SaxiMHAClassification', 'SaxiMHAFBRegression', 'SaxiOctree', 'SaxiMHAFBRegression_V', 'SaxiIdxAE', 'SaxiDenoiseUnet', 'SaxiDDPMUnet', 'SaxiDDPMPC', 'SaxiDDPMPC_Monai', 'SaxiFlowVAE', 'SaxiDDPMPCUNet'])
     input_group.add_argument('--model', help='Model to continue training', type=str, default= None)
     
     input_group.add_argument('--data_module', help='Data module type', required=True, type=str, default=None)

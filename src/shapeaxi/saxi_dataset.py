@@ -30,13 +30,13 @@ else:
   code_path = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[:-1])
 sys.path.append(code_path)
 
-import monai
 from monai.data import DataLoader as monai_DataLoader
 from shapeaxi import utils
 import shapeaxi.saxi_transforms as saxi_transforms
-import argparse
-from collections.abc import Callable
 
+from collections.abc import Callable
+from copy import copy
+import h5py
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #
 #                                                                     Classification, Regression, Segmentation                                                                      #
@@ -110,6 +110,29 @@ class SaxiDataset(Dataset):
     def getSurfPath(self, idx):
         return self.df.iloc[idx][self.surf_column]
 
+class SaxiDatasetPreLoad(SaxiDataset):
+    #This class is designed to make it easier to work with 3D surface data stored in files
+    #It provides methods for loading and preprocessing the data and allows for flexible configurations depending on the specific use case
+    def __init__(self, num_samples=None, **kwargs):
+        super().__init__(**kwargs)
+        
+        if num_samples is None:
+            num_samples = len(self.df)
+
+        self.num_samples = num_samples
+
+        self.surfs = []
+        for idx in range(len(self.df)):
+            surf = self.getSurf(idx)
+            self.surfs.append(surf)
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        #Get item function for the dataset
+        idx = random.randint(0, len(self.df)-1)
+        return super().__getitem__(idx)
 
 class SaxiDataModule(LightningDataModule):
     #It provides a structured and configurable way to load, preprocess, and organize 3D surface data for machine learning tasks, based on the specific requirements of the model type
@@ -219,10 +242,12 @@ class SaxiDataModuleVF(LightningDataModule):
         self.surf_property = self.hparams.surf_property if hasattr(self.hparams, 'surf_property') else None   
 
         scale_factor = self.hparams.scale_factor if hasattr(self.hparams, 'scale_factor') else None     
-        self.train_transform = saxi_transforms.TrainTransform(scale_factor=scale_factor)
-        self.valid_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor)
-        self.test_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor)
-        self.drop_last = self.hparams.drop_last
+        rescale_factor = self.hparams.rescale_factor if hasattr(self.hparams, 'rescale_factor') else 1.0
+
+        self.train_transform = saxi_transforms.TrainTransform(scale_factor=scale_factor, rescale_factor=rescale_factor)
+        self.valid_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor, rescale_factor=rescale_factor)
+        self.test_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor, rescale_factor=rescale_factor)
+        self.drop_last = self.hparams.drop_last if hasattr(self.hparams, 'drop_last') else False 
 
     @staticmethod
     def add_data_specific_args(parent_parser):
@@ -244,6 +269,7 @@ class SaxiDataModuleVF(LightningDataModule):
         group.add_argument('--test_transform', type=Callable, default=None)
         group.add_argument('--drop_last', type=bool, default=False)
         group.add_argument('--surf_property', type=str, default=None)
+        group.add_argument('--rescale_factor', type=float, default=1.0)
 
         return parent_parser
 
@@ -285,6 +311,27 @@ class SaxiDataModuleVF(LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
 
+
+class SaxiDataModuleVFPreLoad(SaxiDataModuleVF):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        parent_parser = SaxiDataModuleVF.add_data_specific_args(parent_parser)
+        group = parent_parser.add_argument_group("SaxiDataModuleVFPreLoad")
+        group.add_argument('--num_train_samples', type=int, default=None)
+        group.add_argument('--num_val_samples', type=int, default=None)
+        group.add_argument('--num_test_samples', type=int, default=None)        
+
+        return parent_parser
+
+    def setup(self, stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_ds = SaxiDatasetPreLoad(num_samples=self.hparams.num_train_samples, df=self.df_train, mount_point=self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.train_transform, CN=False)
+        self.val_ds = SaxiDatasetPreLoad(num_samples=self.hparams.num_val_samples, df=self.df_val, mount_point=self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.valid_transform, CN=False)
+        self.test_ds = SaxiDatasetPreLoad(num_samples=self.hparams.num_test_samples, df=self.df_test, mount_point=self.mount_point, surf_column=self.surf_column, surf_property=self.surf_property, class_column=self.class_column, scalar_column=self.scalar_column, transform=self.test_transform, CN=False)
 
 
 class SaxiDataModuleVFRRRSRT(LightningDataModule):
@@ -364,10 +411,10 @@ class SaxiDataModuleVFRRRSRT(LightningDataModule):
         return DataLoader(self.train_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, shuffle=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
 
     def val_dataloader(self):
-        return DataLoader(self.val_ds, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
+        return DataLoader(self.val_ds, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True, drop_last=self.drop_last, collate_fn=self.pad_verts_faces)
 
     def test_dataloader(self):
-        return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, persistent_workers=True, pin_memory=True, collate_fn=self.pad_verts_faces)
+        return DataLoader(self.test_ds, batch_size=1, num_workers=self.num_workers, collate_fn=self.pad_verts_faces)
 
 #####################################################################################################################################################################################
 #                                                                                                                                                                                   #
@@ -1076,3 +1123,241 @@ class SaxiOctreeDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return monai_DataLoader(self.test_dataset,batch_size=1, num_workers=self.num_workers, drop_last=True, collate_fn=self.collate_fn)
+    
+
+synsetid_to_cate = {
+    '02691156': 'airplane', '02773838': 'bag', '02801938': 'basket',
+    '02808440': 'bathtub', '02818832': 'bed', '02828884': 'bench',
+    '02876657': 'bottle', '02880940': 'bowl', '02924116': 'bus',
+    '02933112': 'cabinet', '02747177': 'can', '02942699': 'camera',
+    '02954340': 'cap', '02958343': 'car', '03001627': 'chair',
+    '03046257': 'clock', '03207941': 'dishwasher', '03211117': 'monitor',
+    '04379243': 'table', '04401088': 'telephone', '02946921': 'tin_can',
+    '04460130': 'tower', '04468005': 'train', '03085013': 'keyboard',
+    '03261776': 'earphone', '03325088': 'faucet', '03337140': 'file',
+    '03467517': 'guitar', '03513137': 'helmet', '03593526': 'jar',
+    '03624134': 'knife', '03636649': 'lamp', '03642806': 'laptop',
+    '03691459': 'speaker', '03710193': 'mailbox', '03759954': 'microphone',
+    '03761084': 'microwave', '03790512': 'motorcycle', '03797390': 'mug',
+    '03928116': 'piano', '03938244': 'pillow', '03948459': 'pistol',
+    '03991062': 'pot', '04004475': 'printer', '04074963': 'remote_control',
+    '04090263': 'rifle', '04099429': 'rocket', '04225987': 'skateboard',
+    '04256520': 'sofa', '04330267': 'stove', '04530566': 'vessel',
+    '04554684': 'washer', '02992529': 'cellphone',
+    '02843684': 'birdhouse', '02871439': 'bookshelf',
+    # '02858304': 'boat', no boat in our dataset, merged into vessels
+    # '02834778': 'bicycle', not in our taxonomy
+}
+cate_to_synsetid = {v: k for k, v in synsetid_to_cate.items()}
+
+
+class ShapeNetCore(torch.utils.data.Dataset):
+
+    GRAVITATIONAL_AXIS = 1
+    
+    def __init__(self, path, cates, split, scale_mode, transform=None):
+        super().__init__()
+        assert isinstance(cates, list), '`cates` must be a list of cate names.'
+        assert split in ('train', 'val', 'test')
+        assert scale_mode is None or scale_mode in ('global_unit', 'shape_unit', 'shape_bbox', 'shape_half', 'shape_34')
+        self.path = path
+        if 'all' in cates:
+            cates = cate_to_synsetid.keys()
+        self.cate_synsetids = [cate_to_synsetid[s] for s in cates]
+        self.cate_synsetids.sort()
+        self.split = split
+        self.scale_mode = scale_mode
+        self.transform = transform
+
+        self.pointclouds = []
+        self.stats = None
+
+        self.get_statistics()
+        self.load()
+
+    def get_statistics(self):
+
+        basename = os.path.basename(self.path)
+        dsetname = basename[:basename.rfind('.')]
+        stats_dir = os.path.join(os.path.dirname(self.path), dsetname + '_stats')
+        os.makedirs(stats_dir, exist_ok=True)
+
+        if len(self.cate_synsetids) == len(cate_to_synsetid):
+            stats_save_path = os.path.join(stats_dir, 'stats_all.pt')
+        else:
+            stats_save_path = os.path.join(stats_dir, 'stats_' + '_'.join(self.cate_synsetids) + '.pt')
+        if os.path.exists(stats_save_path):
+            self.stats = torch.load(stats_save_path)
+            return self.stats
+
+        with h5py.File(self.path, 'r') as f:
+            pointclouds = []
+            for synsetid in self.cate_synsetids:
+                for split in ('train', 'val', 'test'):
+                    pointclouds.append(torch.from_numpy(f[synsetid][split][...]))
+
+        all_points = torch.cat(pointclouds, dim=0) # (B, N, 3)
+        B, N, _ = all_points.size()
+        mean = all_points.view(B*N, -1).mean(dim=0) # (1, 3)
+        std = all_points.view(-1).std(dim=0)        # (1, )
+
+        self.stats = {'mean': mean, 'std': std}
+        torch.save(self.stats, stats_save_path)
+        return self.stats
+
+    def load(self):
+
+        def _enumerate_pointclouds(f):
+            for synsetid in self.cate_synsetids:
+                cate_name = synsetid_to_cate[synsetid]
+                for j, pc in enumerate(f[synsetid][self.split]):
+                    yield torch.from_numpy(pc), j, cate_name
+        
+        with h5py.File(self.path, mode='r') as f:
+            for pc, pc_id, cate_name in _enumerate_pointclouds(f):
+
+                if self.scale_mode == 'global_unit':
+                    shift = pc.mean(dim=0).reshape(1, 3)
+                    scale = self.stats['std'].reshape(1, 1)
+                elif self.scale_mode == 'shape_unit':
+                    shift = pc.mean(dim=0).reshape(1, 3)
+                    scale = pc.flatten().std().reshape(1, 1)
+                elif self.scale_mode == 'shape_half':
+                    shift = pc.mean(dim=0).reshape(1, 3)
+                    scale = pc.flatten().std().reshape(1, 1) / (0.5)
+                elif self.scale_mode == 'shape_34':
+                    shift = pc.mean(dim=0).reshape(1, 3)
+                    scale = pc.flatten().std().reshape(1, 1) / (0.75)
+                elif self.scale_mode == 'shape_bbox':
+                    pc_max, _ = pc.max(dim=0, keepdim=True) # (1, 3)
+                    pc_min, _ = pc.min(dim=0, keepdim=True) # (1, 3)
+                    shift = ((pc_min + pc_max) / 2).view(1, 3)
+                    scale = (pc_max - pc_min).max().reshape(1, 1) / 2
+                else:
+                    shift = torch.zeros([1, 3])
+                    scale = torch.ones([1, 1])
+
+                pc = (pc - shift) / scale
+
+                self.pointclouds.append({
+                    'pointcloud': pc,
+                    'cate': cate_name,
+                    'id': pc_id,
+                    'shift': shift,
+                    'scale': scale
+                })
+
+        # Deterministically shuffle the dataset
+        self.pointclouds.sort(key=lambda data: data['id'], reverse=False)
+        random.Random(2020).shuffle(self.pointclouds)
+
+    def __len__(self):
+        return len(self.pointclouds)
+
+    def __getitem__(self, idx):
+        data = {k:v.clone() if isinstance(v, torch.Tensor) else copy(v) for k, v in self.pointclouds[idx].items()}
+        if self.transform is not None:
+            data = self.transform(data)
+        return data
+    
+class ShapeNetCoreDataModule(LightningDataModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+        
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("ShapeNetCoreDataModule")
+        
+        # Datasets and loaders
+        group.add_argument('--dataset_path', type=str, default='./data/shapenet.hdf5')
+        group.add_argument('--categories', type=str, nargs="+", default=['airplane'])
+        group.add_argument('--scale_mode', type=str, default='shape_unit')
+        group.add_argument('--train_batch_size', type=int, default=128)
+        group.add_argument('--val_batch_size', type=int, default=64)
+        group.add_argument('--num_workers', type=int, default=1)        
+
+        return parent_parser
+        
+
+    def setup(self,stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_dataset = ShapeNetCore(self.hparams.dataset_path, self.hparams.categories, 'train', self.hparams.scale_mode)
+        self.val_dataset = ShapeNetCore(self.hparams.dataset_path, self.hparams.categories, 'val', self.hparams.scale_mode)
+        self.test_dataset = ShapeNetCore(self.hparams.dataset_path, self.hparams.categories, 'test', self.hparams.scale_mode)
+
+    def train_dataloader(self):  
+        return DataLoader(self.train_dataset,batch_size=self.hparams.train_batch_size, shuffle=True, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=True)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset,batch_size=self.hparams.val_batch_size, num_workers=self.hparams.num_workers, drop_last=True)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=1, num_workers=1, drop_last=True)
+
+
+class NumpyDataset(torch.utils.data.Dataset):
+    def __init__(self, path, transform=None, allow_pickle=False, num_samples=None):
+        super().__init__()
+        self.path = path
+        self.transform = transform
+        self.pointclouds = np.load(self.path, allow_pickle=False)
+        self.num_samples = num_samples
+
+    def __len__(self):
+        if self.num_samples:
+            return self.num_samples
+        return len(self.pointclouds)
+
+    def __getitem__(self, idx):
+
+        if self.num_samples:
+            idx = random.randint(0, len(self.pointclouds) - 1)
+
+        data = torch.tensor(self.pointclouds[idx]).to(torch.float32)
+        if self.transform is not None:
+            data = self.transform(data).to(torch.float32)
+        return data
+    
+class NumpyDataModule(LightningDataModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+
+        scale_factor = self.hparams.scale_factor if hasattr(self.hparams, 'scale_factor') else None     
+        self.train_transform = saxi_transforms.TrainTransform(scale_factor=scale_factor, rescale_factor=self.hparams.rescale_factor)
+        self.valid_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor, rescale_factor=self.hparams.rescale_factor)
+        self.test_transform = saxi_transforms.EvalTransform(scale_factor=scale_factor, rescale_factor=self.hparams.rescale_factor)
+        
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("ShapeNetCoreDataModule")
+        
+        # Datasets and loaders
+        group.add_argument('--train_np', type=str, required=True)
+        group.add_argument('--train_samples', type=int, default=None)
+        group.add_argument('--val_np', type=str, required=True)
+        group.add_argument('--test_np', type=str, required=True)
+        group.add_argument('--batch_size', type=int, default=32)
+        group.add_argument('--num_workers', type=int, default=1)        
+        group.add_argument('--rescale_factor', type=float, default=1.0)
+
+        return parent_parser
+        
+
+    def setup(self,stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_dataset = NumpyDataset(self.hparams.train_np, num_samples=self.hparams.train_samples, transform=self.train_transform)
+        self.val_dataset = NumpyDataset(self.hparams.val_np, transform=self.valid_transform)
+        self.test_dataset = NumpyDataset(self.hparams.test_np, transform=self.valid_transform)
+
+    def train_dataloader(self):  
+        return DataLoader(self.train_dataset,batch_size=self.hparams.batch_size, shuffle=True, num_workers=self.hparams.num_workers, pin_memory=True)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=1, num_workers=1, drop_last=True)

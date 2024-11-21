@@ -479,16 +479,17 @@ def ScaleSurfT(surf, mean_arr=None, scale_factor=None, copy=True):
         surf = surf.clone()
 
     if mean_arr is None:
-        mean_arr = surf.mean(dim=0)
-    
-    bounds_max_arr = surf.max(dim=0)[0]
+
+        bounds_min = torch.tensor([surf[:, 0].min(), surf[:, 1].min(), surf[:, 2].min()])
+        bounds_max = torch.tensor([surf[:, 0].max(), surf[:, 1].max(), surf[:, 2].max()])
+        mean_arr = (bounds_max + bounds_min)/2.0 if mean_arr is None else mean_arr
 
     # Centering points of the shape
     surf = surf - mean_arr
 
     # Computing scale factor if it is not provided
     if scale_factor is None:
-        scale_factor = 1.0 / (bounds_max_arr - mean_arr).norm()
+        scale_factor = 1.0 / (bounds_max - mean_arr).norm()
 
     # Scale points of the shape by scale factor
     surf = surf * scale_factor
@@ -504,6 +505,15 @@ def RandomScale(surf, scale_range):
     scale_factor = np.random.random() * (scale_range[1] - scale_range[0]) + scale_range[0]
     surf, _, _ = ScaleSurf(surf, mean_arr=np.zeros(3), scale_factor=scale_factor)
     return surf
+
+def Scaletransform(surf, scale_factor):
+    surf, _, _ = ScaleSurf(surf, mean_arr=np.zeros(3), scale_factor=scale_factor)
+    return surf
+
+def ScaletransformT(surf, scale_factor):    
+    surf, _, _ = ScaleSurfT(surf, mean_arr=torch.zeros(3), scale_factor=scale_factor)
+    return surf
+
 
 def TranslateSurfT(surf, translation):
     surf_translated = surf + translation
@@ -544,7 +554,7 @@ def RotateSurf(surf, rotationAngle, rotationVector):
     return RotateTransform(surf, transform)
 
 def RotateSurfT(surf, rotation_matrix):
-    surf_rotated = torch.matmul(surf.double(), rotation_matrix) 
+    surf_rotated = torch.matmul(surf, rotation_matrix) 
     return surf_rotated
 
 def RotateInverse(surf, rotationAngle, rotationVector):
@@ -583,8 +593,8 @@ def RandomRotation(surf):
     return RotateSurf(surf, rotationAngle, rotationVector), rotationAngle, rotationVector
 
 def RandomRotationT(surf):
-    rotationAngle = torch.tensor(np.random.random() * 360.0, dtype=torch.double) 
-    rotationVector = torch.tensor(np.random.random(3) * 2.0 - 1.0, dtype=torch.double)
+    rotationAngle = torch.tensor(np.random.random() * 360.0, dtype=torch.float32) 
+    rotationVector = torch.tensor(np.random.random(3) * 2.0 - 1.0, dtype=torch.float32)
     rotationVector = rotationVector / torch.norm(rotationVector)
 
     rotation_matrix = GetRotationMatrixT(rotationAngle, rotationVector)
@@ -593,20 +603,36 @@ def RandomRotationT(surf):
     return surf_rotated
 
 def GetRotationMatrixT(rotationAngle, rotationVector):
-    axis_x = rotationVector[0]
-    axis_y = rotationVector[1]
-    axis_z = rotationVector[2]
+    """
+    Compute a 3x3 rotation matrix given a rotation angle and a rotation axis vector.
 
+    Parameters:
+    - rotationAngle (float or torch.Tensor): The rotation angle in degrees.
+    - rotationVector (torch.Tensor): A 1D tensor of shape (3,) representing the axis of rotation.
+
+    Returns:
+    - torch.Tensor: A 3x3 tensor representing the rotation matrix.
+    """
+    if not isinstance(rotationAngle, torch.Tensor):
+        rotationAngle = torch.tensor(rotationAngle, dtype=torch.double)
+    if not isinstance(rotationVector, torch.Tensor) or rotationVector.shape != (3,):
+        raise ValueError("rotationVector must be a torch.Tensor of shape (3,)")
+
+    # Normalize the rotation vector
+    rotationVector = rotationVector / torch.linalg.norm(rotationVector)
+
+    axis_x, axis_y, axis_z = rotationVector
     radians = torch.deg2rad(rotationAngle)
     cos_theta = torch.cos(radians)
     sin_theta = torch.sin(radians)
     complement_cos_theta = 1.0 - cos_theta
 
+    # Create the rotation matrix
     rotation_matrix = torch.tensor([
         [cos_theta + axis_x * axis_x * complement_cos_theta, axis_x * axis_y * complement_cos_theta - axis_z * sin_theta, axis_x * axis_z * complement_cos_theta + axis_y * sin_theta],
         [axis_y * axis_x * complement_cos_theta + axis_z * sin_theta, cos_theta + axis_y * axis_y * complement_cos_theta, axis_y * axis_z * complement_cos_theta - axis_x * sin_theta],
         [axis_z * axis_x * complement_cos_theta - axis_y * sin_theta, axis_z * axis_y * complement_cos_theta + axis_x * sin_theta, cos_theta + axis_z * axis_z * complement_cos_theta]
-    ], dtype=torch.double)
+    ], dtype=torch.float32, device=rotationVector.device)
 
     return rotation_matrix
 

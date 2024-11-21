@@ -105,77 +105,134 @@ class AttentionRings(nn.Module):
 
 
 class MHAEncoder(nn.Module):
-    def __init__(self, input_dim=3, embed_dim=256, hidden_dim=64, num_heads=256, K=32, output_dim=256, sample_levels=[40962, 10242, 2562, 642, 162], dropout=0.1, return_sorted=True):
+    def __init__(self,  input_dim=3, output_dim=1, stages=[16], num_heads=[16], dropout=0.1, pooling_factor=None, pooling_hidden_dim=None, pooling_K=None, score_pooling=False, feed_forward_hidden_dim=None, use_layer_norm=False, return_v=False, time_dim=None, context_dim=None, use_mean_proj=False):
         super(MHAEncoder, self).__init__()
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.K = K
-        self.sample_levels = sample_levels
-        self.dropout = dropout
-        self.return_sorted = return_sorted
 
-        self.embedding = nn.Linear(input_dim, embed_dim)
+        assert len(stages) == len(num_heads)        
+        assert feed_forward_hidden_dim is None or len(stages) == len(feed_forward_hidden_dim)        
+        assert pooling_factor is None or len(stages) == len(pooling_factor) and len(pooling_factor) == len(pooling_hidden_dim) and len(pooling_factor) == len(pooling_K)
 
-        for i, sl in enumerate(sample_levels):
-            setattr(self, f"mha_{i}", MHA_KNN(embed_dim=embed_dim, num_heads=num_heads, K=K, return_weights=True, dropout=dropout))
-            setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim, hidden_dim=hidden_dim, dropout=dropout)))
         
-        self.output = nn.Linear(embed_dim, output_dim)
-    
-    def sample_points(self, x, Ns):
-        """
-        Samples Ns points from each batch in a tensor of shape (Bs, N, F).
+        self.num_heads = num_heads                
+        self.stages = stages
+        self.dropout = dropout        
+        self.pooling_factor = pooling_factor
+        self.pooling_hidden_dim = pooling_hidden_dim
+        self.pooling_K = pooling_K
+        self.score_pooling = score_pooling
+        self.feed_forward_hidden_dim = feed_forward_hidden_dim        
+        self.use_layer_norm = use_layer_norm
+        self.return_v = return_v        
 
-        Args:
-            x (torch.Tensor): Input tensor of shape (Bs, N, F).
-            Ns (int): Number of points to sample from each batch.
-
-        Returns:
-            torch.Tensor: Output tensor of shape (Bs, Ns, F).
-        """
-        Bs, N, F = x.shape
-
-        # Generate random indices for sampling
-        indices = torch.randint(low=0, high=N, size=(Bs, Ns), device=x.device).unsqueeze(-1)
-
-        # Gather the sampled points
-        x = knn_gather(x, indices).squeeze(-2).contiguous()
-
-        return x, indices
+        self.embedding = ProjectionHead(input_dim, hidden_dim=self.stages[0], output_dim=self.stages[0])
         
-    def forward(self, x):
+        for i, st in enumerate(self.stages):
+
+            if time_dim is not None:
+                setattr(self, f"time_proj_{i}", ProjectionHead(time_dim, hidden_dim=st, output_dim=st))
+
+            if context_dim is not None:
+                setattr(self, f"context_proj_{i}", ProjectionHead(context_dim, hidden_dim=st, output_dim=st))
+
+            if self.num_heads is not None and self.num_heads[i] is not None:
+                setattr(self, f"mha_{i}", Residual(MHA(embed_dim=st, num_heads=num_heads[i], dropout=dropout)))
+                if self.use_layer_norm:
+                    setattr(self, f"norm_mha_{i}", nn.LayerNorm(st))
+
+            if self.feed_forward_hidden_dim is not None and feed_forward_hidden_dim[i] is not None:
+                setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim=st, hidden_dim=feed_forward_hidden_dim[i], dropout=dropout)))
+                if self.use_layer_norm:
+                    setattr(self, f"norm_ff_{i}", nn.LayerNorm(st))
+
+            if self.pooling_factor is not None and self.pooling_factor[i] is not None and self.pooling_hidden_dim is not None and self.pooling_hidden_dim[i] is not None and self.pooling_K is not None and self.pooling_K[i] is not None: 
+                setattr(self, f"pool_{i}", AttentionPooling_V(embed_dim=st, hidden_dim=self.pooling_hidden_dim[i], K=self.pooling_K[i], pooling_factor=self.pooling_factor[i], score_pooling=self.score_pooling))
+            
+            if i+1 < len(self.stages):
+                st_n = self.stages[i+1] 
+                setattr(self, f"output_{i}", ProjectionHead(st, hidden_dim=st_n, output_dim=st_n))
+
+        if use_mean_proj:
+            setattr(self, f"mean_proj", nn.Sequential(
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=self.stages[-1]), 
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=self.stages[-1]), 
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=output_dim)
+                )
+            )
+            setattr(self, f"std_proj", nn.Sequential(
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=self.stages[-1]), 
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=self.stages[-1]), 
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=output_dim)
+                )
+            )
+        else:
+            setattr(self, f"final_proj", nn.Sequential(
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=self.stages[-1]), 
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=self.stages[-1]), 
+                    ProjectionHead(self.stages[-1], hidden_dim=self.stages[-1], output_dim=output_dim)
+                )
+            )
+
+        
+    def forward(self, x, x_v=None, context=None, time=None, beta=None):
         
         x = self.embedding(x)
+        context_proj = 0
+        time_proj = 0
 
-        weights = torch.zeros(x.shape[0], x.shape[1], device=x.device)
-        idx = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)
+        if beta is not None:
+            batch_size = x.shape[0]
+            beta = beta.view(batch_size, 1, 1)          # (B, 1, 1)
+            context = context.view(batch_size, 1, -1)   # (B, 1, F)
+
+            time_emb = torch.cat([beta, torch.sin(beta), torch.cos(beta)], dim=-1)  # (B, 1, 3)
+
+            context = torch.cat([time_emb, context], dim=-1) 
+
         
-        indices = []
-        
-        for i, sl in enumerate(self.sample_levels):
-            
-            if i > 0:
-                # select the first sl points a.k.a. downsample/pooling                
-                x, x_i = self.sample_points(x, sl)
+        for i, st in enumerate(self.stages):
 
-                # initialize idx with the index of the current level
-                idx = x_i
-                
-                for idx_prev in reversed(indices): # go through the list of the previous ones in reverse
-                    idx = knn_gather(idx_prev, idx).squeeze(-2).contiguous() # using the indices of the previous level update idx, at the end idx should have the indices of the first level
-                
-                idx = idx.squeeze(-1)
-                indices.append(x_i)
-            
-            # the mha will select optimal points from the input
-            x, x_w = getattr(self, f"mha_{i}")(x)
-            x = getattr(self, f"ff_{i}")(x)
-            
-            weights.scatter_add_(1, idx, x_w)
+            if hasattr(self, f"time_proj_{i}"):
+                time_proj = getattr(self, f"time_proj_{i}")(time)
+                x = x + time_proj
 
-        #output layer
-        x = self.output(x)
-        return x, weights
+            if hasattr(self, f"context_proj_{i}"):
+                context_proj = getattr(self, f"context_proj_{i}")(context)
+                x = x + context_proj
+            
+            if hasattr(self, f"mha_{i}"):
+                x = getattr(self, f"mha_{i}")(x)
+            if hasattr(self, f"norm_mha_{i}"):
+                x = getattr(self, f"norm_mha_{i}")(x)                
+
+            if hasattr(self, f"time_proj_{i}"):
+                x = x + time_proj
+            if hasattr(self, f"context_proj_{i}"):
+                x = x + context_proj
+
+            if hasattr(self, f"ff_{i}"):
+                x = getattr(self, f"ff_{i}")(x)
+            if hasattr(self, f"norm_ff_{i}"):
+                x = getattr(self, f"norm_ff_{i}")(x)
+
+            if hasattr(self, f"pool_{i}"):
+                x, x_v_next, x_s, _, _ = getattr(self, f"pool_{i}")(x, x_v)                
+                x_v = x_v_next
+
+            if hasattr(self, f"time_proj_{i}"):
+                x = x + time_proj
+            if hasattr(self, f"context_proj_{i}"):
+                x = x + context_proj
+
+            if hasattr(self, f"output_{i}"):
+                x = getattr(self, f"output_{i}")(x)
+
+        if hasattr(self, f"mean_proj"):
+            x_m = self.mean_proj(x)
+            x_s = self.std_proj(x)
+            return x_m, x_s
+        else:
+            x = self.final_proj(x)
+            return x
     
 
 class MHADecoder(nn.Module):
@@ -500,7 +557,7 @@ class MHAIcoDecoder(nn.Module):
         return x
 
 class MHAIdxEncoder(nn.Module):
-    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_factor=None, pooling_hidden_dim=None, score_pooling=False, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, return_v=False, use_direction=False, time_embed_dim=None):
+    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_factor=[0.125], pooling_hidden_dim=[8], pooling_K=[27], score_pooling=False, conv_v_kernel_size=None, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, return_v=False, use_direction=False, time_embed_dim=None):
         super(MHAIdxEncoder, self).__init__()
 
         
@@ -510,37 +567,50 @@ class MHAIdxEncoder(nn.Module):
         self.dropout = dropout        
         self.pooling_factor = pooling_factor
         self.pooling_hidden_dim = pooling_hidden_dim
+        self.pooling_K = pooling_K
         self.score_pooling = score_pooling
         self.feed_forward_hidden_dim = feed_forward_hidden_dim
         self.use_skip_connection = use_skip_connection
+        self.conv_v_kernel_size = conv_v_kernel_size
         self.use_layer_norm = use_layer_norm
         self.return_v = return_v
         self.time_embed_dim = time_embed_dim
+        
 
         self.embedding = nn.Linear(input_dim, self.stages[0], bias=False)
+
+        if self.pooling_factor is not None:
+            assert len(self.pooling_factor) == len(self.pooling_hidden_dim) and len(self.pooling_factor) == len(self.pooling_K)
 
         for i, st in enumerate(self.stages):
 
             if time_embed_dim is not None:
-                setattr(self, f"time_embedding_{i}", nn.Linear(time_embed_dim, st, bias=False))
+                setattr(self, f"time_proj_{i}", nn.Linear(time_embed_dim, st, bias=False))
+                setattr(self, f"norm_time_0_{i}", nn.LayerNorm(st))
+                setattr(self, f"norm_time_1_{i}", nn.LayerNorm(st))
+                setattr(self, f"norm_time_2_{i}", nn.LayerNorm(st))
 
-            if self.use_layer_norm:
-                setattr(self, f"norm_mha_{i}", nn.LayerNorm(st))
-            setattr(self, f"mha_{i}", Residual(MHA_KNN_V(embed_dim=st, num_heads=num_heads[i], K=K[i], dropout=dropout, return_sorted=return_sorted, use_direction=use_direction)))
+
+            if self.conv_v_kernel_size is not None and self.conv_v_kernel_size[i] is not None:
+                setattr(self, f"conv_0_{i}", Residual(ConvBlock_V(in_channels=st, out_channels=st, K=self.conv_v_kernel_size[i], kernel_size=self.conv_v_kernel_size[i], bias=False)))
+                setattr(self, f"conv_1_{i}", Residual(ConvBlock_V(in_channels=st, out_channels=st, K=self.conv_v_kernel_size[i], kernel_size=self.conv_v_kernel_size[i], bias=False)))
+                setattr(self, f"conv_2_{i}", Residual(ConvBlock_V(in_channels=st, out_channels=st, K=self.conv_v_kernel_size[i], kernel_size=self.conv_v_kernel_size[i], bias=False)))
+
+            if self.K is not None and self.K[i] is not None:
+                setattr(self, f"mha_{i}", Residual(MHA_KNN_V(embed_dim=st, num_heads=num_heads[i], K=K[i], dropout=dropout, return_sorted=return_sorted, use_direction=use_direction)))
+                if self.use_layer_norm:
+                    setattr(self, f"norm_mha_{i}", nn.LayerNorm(st))
 
             if self.feed_forward_hidden_dim is not None and feed_forward_hidden_dim[i] is not None:
+                setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim=st, hidden_dim=feed_forward_hidden_dim[i], dropout=dropout)))
                 if self.use_layer_norm:
                     setattr(self, f"norm_ff_{i}", nn.LayerNorm(st))
-                setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim=st, hidden_dim=feed_forward_hidden_dim[i], dropout=dropout)))
 
-            if self.pooling_factor is not None and self.pooling_factor[i] is not None and self.pooling_hidden_dim is not None and self.pooling_hidden_dim[i] is not None: 
-                setattr(self, f"pool_{i}", AttentionPooling_V(embed_dim=st, hidden_dim=self.pooling_hidden_dim[i], K=self.K[i], pooling_factor=self.pooling_factor[i], score_pooling=self.score_pooling))
+            if self.pooling_factor is not None and self.pooling_factor[i] is not None and self.pooling_hidden_dim is not None and self.pooling_hidden_dim[i] is not None and self.pooling_K is not None and self.pooling_K[i] is not None: 
+                setattr(self, f"pool_{i}", AttentionPooling_V(embed_dim=st, hidden_dim=self.pooling_hidden_dim[i], K=self.pooling_K[i], pooling_factor=self.pooling_factor[i], score_pooling=self.score_pooling))
             
             st_n = self.stages[i+1] if i+1 < len(self.stages) else output_dim
             setattr(self, f"output_{i}", nn.Linear(st, st_n, bias=False))
-
-            if time_embed_dim is not None:
-                time_embed_dim = st
         
     def forward(self, x, x_v, time=None):
         
@@ -551,25 +621,41 @@ class MHAIdxEncoder(nn.Module):
         
         for i, st in enumerate(self.stages):
 
+            time_proj = None
             if time is not None:
-                time = getattr(self, f"time_embedding_{i}")(time)
-                x += time.unsqueeze(1)
+                time_proj = getattr(self, f"time_proj_{i}")(time)
+                time_proj = time_proj.unsqueeze(1)
+                
+                x = x + time_proj
+                x = getattr(self, f"norm_time_0_{i}")(x)
 
-            if self.use_layer_norm:
+            if hasattr(self, f"conv_0_{i}"):
+                x = getattr(self, f"conv_0_{i}")(x, x_v)
+                x = getattr(self, f"conv_1_{i}")(x, x_v)
+                x = getattr(self, f"conv_2_{i}")(x, x_v)
+
+            if time is not None:
+                x = x + time_proj
+                x = getattr(self, f"norm_time_1_{i}")(x)
+            
+            if hasattr(self, f"mha_{i}"):
+                x = getattr(self, f"mha_{i}")(x, x_v)
+            if hasattr(self, f"norm_mha_{i}"):
                 x = getattr(self, f"norm_mha_{i}")(x)
-            
-            x = getattr(self, f"mha_{i}")(x, x_v)
-            
-            if self.feed_forward_hidden_dim is not None and self.feed_forward_hidden_dim[i] is not None:
-                if self.use_layer_norm:
-                    x = getattr(self, f"norm_ff_{i}")(x)
+
+            if time is not None:
+                x = x + time_proj
+                x = getattr(self, f"norm_time_2_{i}")(x)
+
+            if hasattr(self, f"ff_{i}"):
                 x = getattr(self, f"ff_{i}")(x)
+            if hasattr(self, f"norm_ff_{i}"):
+                x = getattr(self, f"norm_ff_{i}")(x)
 
             if self.use_skip_connection:
                 skip_connections.insert(0, x)
 
-            if self.pooling_factor is not None and self.pooling_factor[i] is not None and self.pooling_hidden_dim is not None and self.pooling_hidden_dim[i] is not None: 
-                # pooling_idx, unpooling_idx, x_v_next = self.get_pooling_idx(x_v, self.pooling_factor[i], self.K[i])
+            if hasattr(self, f"pool_{i}"):
                 x, x_v_next, x_s, pooling_idx, unpooling_idx = getattr(self, f"pool_{i}")(x, x_v)
                 unpooling_idxs.insert(0, (x_v, unpooling_idx, x_s))
                 x_v = x_v_next
@@ -585,12 +671,11 @@ class MHAIdxEncoder(nn.Module):
         return x, unpooling_idxs
     
 class MHAIdxDecoder(nn.Module):
-    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_hidden_dim=[8], feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, use_direction=False, time_embed_dim=None):
+    def __init__(self,  input_dim=3, output_dim=1, K=[27], num_heads=[16], stages=[16], dropout=0.1, pooling_hidden_dim=[8], conv_v_kernel_size=None, feed_forward_hidden_dim=None, return_sorted=True, use_skip_connection=False, use_layer_norm=False, use_direction=False, time_embed_dim=None):
         super(MHAIdxDecoder, self).__init__()
 
         assert len(stages) == len(num_heads) == len(K) == len(pooling_hidden_dim)
 
-        
         self.num_heads = num_heads        
         self.K = K
         self.stages = stages
@@ -599,34 +684,40 @@ class MHAIdxDecoder(nn.Module):
         self.feed_forward_hidden_dim = feed_forward_hidden_dim
         self.use_skip_connection = use_skip_connection
         self.use_layer_norm = use_layer_norm
-
-        # self.embedding = KNN_Embedding_V(input_dim=input_dim, embed_dim=self.stages[0], K=self.K[0])
+        self.conv_v_kernel_size = conv_v_kernel_size
+        
         self.embedding = nn.Linear(input_dim, self.stages[0], bias=False)
 
         for i, st in enumerate(self.stages):
 
+            if time_embed_dim is not None:
+                setattr(self, f"time_proj_{i}", nn.Linear(time_embed_dim, st, bias=False))
+                setattr(self, f"norm_time_0_{i}", nn.LayerNorm(st))
+                setattr(self, f"norm_time_1_{i}", nn.LayerNorm(st))
+                setattr(self, f"norm_time_2_{i}", nn.LayerNorm(st))
+
             setattr(self, f"pool_{i}", AttentionPooling_Idx(embed_dim=st, hidden_dim=pooling_hidden_dim[i]))
 
-            if time_embed_dim is not None:
-                setattr(self, f"time_embedding_{i}", nn.Linear(time_embed_dim, st, bias=False))
-
-            if self.use_layer_norm:
-                setattr(self, f"norm_mha_{i}", nn.LayerNorm(st))
-            setattr(self, f"mha_{i}", Residual(MHA_KNN_V(embed_dim=st, num_heads=num_heads[i], K=K[i], dropout=dropout, return_sorted=return_sorted, use_direction=use_direction)))
-
             if self.use_skip_connection:
-                setattr(self, f"proj_{i}", ProjectionHead(input_dim=st*2, hidden_dim=st, output_dim=st, dropout=dropout))
+                setattr(self, f"proj_{i}", Residual(ProjectionHead(input_dim=st*2, hidden_dim=st, output_dim=st, dropout=dropout)))
+
+            if self.conv_v_kernel_size is not None and self.conv_v_kernel_size[i] is not None:
+                setattr(self, f"conv_0_{i}", Residual(ConvBlock_V(in_channels=st, out_channels=st, K=self.conv_v_kernel_size[i], kernel_size=self.conv_v_kernel_size[i], bias=False)))
+                setattr(self, f"conv_1_{i}", Residual(ConvBlock_V(in_channels=st, out_channels=st, K=self.conv_v_kernel_size[i], kernel_size=self.conv_v_kernel_size[i], bias=False)))
+                setattr(self, f"conv_2_{i}", Residual(ConvBlock_V(in_channels=st, out_channels=st, K=self.conv_v_kernel_size[i], kernel_size=self.conv_v_kernel_size[i], bias=False)))
+
+            if self.K is not None and self.K[i] is not None:
+                setattr(self, f"mha_{i}", Residual(MHA_KNN_V(embed_dim=st, num_heads=num_heads[i], K=K[i], dropout=dropout, return_sorted=return_sorted, use_direction=use_direction)))
+                if self.use_layer_norm:
+                    setattr(self, f"norm_mha_{i}", nn.LayerNorm(st))
 
             if self.feed_forward_hidden_dim is not None and feed_forward_hidden_dim[i] is not None:
+                setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim=st, hidden_dim=feed_forward_hidden_dim[i], dropout=dropout)))
                 if self.use_layer_norm:
                     setattr(self, f"norm_ff_{i}", nn.LayerNorm(st))
-                setattr(self, f"ff_{i}", Residual(FeedForward(embed_dim=st, hidden_dim=feed_forward_hidden_dim[i], dropout=dropout)))
             
             st_n = self.stages[i+1] if i+1 < len(self.stages) else output_dim
             setattr(self, f"output_{i}", nn.Linear(st, st_n, bias=False))
-
-            if time_embed_dim is not None:
-                time_embed_dim = st
         
     def forward(self, x, unpooling_idxs, skip_connections=None, time=None):
         
@@ -641,24 +732,180 @@ class MHAIdxDecoder(nn.Module):
             x, x_s = getattr(self, f"pool_{i}")(x, unpooling_idx)
 
             if self.use_skip_connection:
-                x = torch.cat([x, skip_connections[i]], dim=-1)
-                x = getattr(self, f"proj_{i}")(x)
+                x = getattr(self, f"proj_{i}")(x, skip_connections[i])
+
+            time_proj = None
+            if time is not None:
+                time_proj = getattr(self, f"time_proj_{i}")(time)
+                time_proj = time_proj.unsqueeze(1)
+                x = x + time_proj
+                x = getattr(self, f"norm_time_0_{i}")(x)
+
+            if hasattr(self, f"conv_0_{i}"):
+                x = getattr(self, f"conv_0_{i}")(x, x_v)
+                x = getattr(self, f"conv_1_{i}")(x, x_v)
+                x = getattr(self, f"conv_2_{i}")(x, x_v)
 
             if time is not None:
-                time = getattr(self, f"time_embedding_{i}")(time)
-                x += time.unsqueeze(1)
+                x = x + time_proj
+                x = getattr(self, f"norm_time_1_{i}")(x)
 
-            if self.use_layer_norm:
+            if hasattr(self, f"mha_{i}"):
+                x = getattr(self, f"mha_{i}")(x, x_v)
+            if hasattr(self, f"norm_mha_{i}"):
                 x = getattr(self, f"norm_mha_{i}")(x)
 
-            x = getattr(self, f"mha_{i}")(x, x_v)
+            if time is not None:
+                x = x + time_proj
+                x = getattr(self, f"norm_time_2_{i}")(x)
 
-            if self.use_layer_norm:
-                x = getattr(self, f"norm_ff_{i}")(x)
-
-            if self.feed_forward_hidden_dim is not None and self.feed_forward_hidden_dim[i] is not None:
+            if hasattr(self, f"ff_{i}"):
                 x = getattr(self, f"ff_{i}")(x)
+
+            if hasattr(self, f"norm_ff_{i}"):
+                x = getattr(self, f"norm_ff_{i}")(x)
 
             x = getattr(self, f"output_{i}")(x)
         
         return x
+
+class ContextModulatedNet(nn.Module):
+
+    def __init__(self, input_dim=3, stages=[128, 256, 512, 256, 128, 3], context_dim=256):
+        super().__init__()
+
+        self.stages = stages
+        
+        in_dim = input_dim        
+
+        for i, st in enumerate(stages):
+            activation = None
+            if i < len(stages) - 1:
+                activation = nn.LeakyReLU
+            setattr(self, f"context_modulated{i}", ContextModulated(input_dim=in_dim, output_dim=st, context_dim=context_dim, activation=activation))
+            in_dim = st           
+        
+
+    def forward(self, x, context, beta=None, time=None):
+
+        batch_size = x.shape[0]
+
+        if beta is not None:
+            
+            beta = beta.view(batch_size, 1, 1)          # (B, 1, 1)
+            context = context.view(batch_size, 1, -1)   # (B, 1, F)
+
+            time_emb = torch.cat([beta, torch.sin(beta), torch.cos(beta)], dim=-1)  # (B, 1, 3)
+
+            context = torch.cat([time_emb, context], dim=-1) 
+
+        if time is not None:
+            time = time.view(batch_size, 1, -1)
+            context = torch.cat([time, context], dim=-1)
+
+        if x.shape[1] != context.shape[1]:
+            context = context.repeat(1, x.shape[1], 1)
+        
+        out = x
+        for i, _ in enumerate(self.stages):
+            out = getattr(self, f"context_modulated{i}")(out, context)
+        
+        return x + out
+    
+class PointNetEncoder(nn.Module):
+    def __init__(self, zdim, input_dim=3):
+        super().__init__()
+        self.zdim = zdim
+        self.conv1 = nn.Conv1d(input_dim, 128, 1)
+        self.conv2 = nn.Conv1d(128, 128, 1)
+        self.conv3 = nn.Conv1d(128, 256, 1)
+        self.conv4 = nn.Conv1d(256, 512, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.bn3 = nn.BatchNorm1d(256)
+        self.bn4 = nn.BatchNorm1d(512)
+
+        # Mapping to [c], cmean
+        self.fc1_m = nn.Linear(512, 256)
+        self.fc2_m = nn.Linear(256, 128)
+        self.fc3_m = nn.Linear(128, zdim)
+        self.fc_bn1_m = nn.BatchNorm1d(256)
+        self.fc_bn2_m = nn.BatchNorm1d(128)
+
+        # Mapping to [c], cmean
+        self.fc1_v = nn.Linear(512, 256)
+        self.fc2_v = nn.Linear(256, 128)
+        self.fc3_v = nn.Linear(128, zdim)
+        self.fc_bn1_v = nn.BatchNorm1d(256)
+        self.fc_bn2_v = nn.BatchNorm1d(128)
+
+    def forward(self, x):
+        x = x.transpose(1, 2)
+        
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.bn4(self.conv4(x))
+        
+        x = torch.max(x, 2, keepdim=True)[0]
+        
+        x = x.view(-1, 512)        
+
+        m = F.relu(self.fc_bn1_m(self.fc1_m(x)))
+        m = F.relu(self.fc_bn2_m(self.fc2_m(m)))
+        m = self.fc3_m(m)
+        v = F.relu(self.fc_bn1_v(self.fc1_v(x)))
+        v = F.relu(self.fc_bn2_v(self.fc2_v(v)))
+        v = self.fc3_v(v)
+
+        # Returns both mean and logvariance, just ignore the latter in deteministic cases.
+        return m, v
+
+class HilbertSort3D(nn.Module):    
+    def __init__(self, origin=(0.0, 0.0, 0.0), radius=1.0, bins=32):
+        super().__init__()
+        """
+        Initialize HilbertSort3D.
+        :param origin: Tuple of floats, the origin point for the Hilbert sorting.
+        :param radius: Float, radius of the space.
+        :param bins: Int, number of bins (must be a power of 2).
+        """
+        origin = torch.tensor(origin, dtype=torch.float32)
+        radius = torch.tensor(radius)
+        bins = torch.tensor(bins)
+        curve = self._generate_hilbert_curve(bins)
+        self.register_buffer('origin', origin)
+        self.register_buffer('radius', radius)
+        self.register_buffer('bins', bins)
+        self.register_buffer('curve', curve)
+
+    def _generate_hilbert_curve(self, bins):
+        """
+        Generate the 3D Hilbert curve indices for given bins.
+        Returns a tensor mapping bin (x, y, z) coordinates to their 1D Hilbert order.
+        """
+        size = bins
+        indices = torch.arange(size**3).view(size, size, size)
+        return indices
+
+    def forward(self, point_cloud):
+        """
+        Sort a batch of point clouds using Hilbert sorting.
+        :param point_cloud: Tensor of shape (B, N, 3), where B is batch size, N is number of points.
+        :return: Sorted tensor of shape (B, N, 3).
+        """
+        B, N, _ = point_cloud.shape
+
+        # Center and normalize data
+        point_cloud = point_cloud - self.origin
+        bin_interval = (self.radius * 2) / self.bins
+        bins = ((point_cloud / bin_interval) + (self.bins // 2)).long()
+        bins = torch.clamp(bins, 0, self.bins - 1)
+
+        # Flatten the bin coordinates into a 1D Hilbert index
+        hilbert_indices = self.curve[bins[:, :, 0], bins[:, :, 1], bins[:, :, 2]]
+
+        # Sort each batch of point clouds by their Hilbert indices
+        sorted_indices = torch.argsort(hilbert_indices, dim=1)
+        sorted_points = torch.gather(point_cloud, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
+        return sorted_points
