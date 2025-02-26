@@ -5099,11 +5099,7 @@ class NeRFLightning(LightningModule):
             [(i - W * .5) / focal, -(j - H * .5) / focal, -torch.ones_like(i, device = device)], -1
         ).unsqueeze(0).repeat(batch_size, 1, 1, 1)
         
-        # rays_d = torch.sum(dirs[..., None, :] * c2w[:, :3, :3], -1)
-        # rays_d = rays_d.view(batch_size, -1, 3)
-        
         rays_d = torch.bmm(dirs.view(batch_size, -1, 3), c2w[:, :3, :3].transpose(-1, -2))
-        # rays_d = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)
         
         rays_o = c2w[:, :3, -1].unsqueeze(1).expand(rays_d.shape)
 
@@ -5114,7 +5110,8 @@ class NeRFLightning(LightningModule):
         near = self.hparams.near
         far = self.hparams.far
         N_samples = self.hparams.nb_bins
-
+        
+        N_rays = rays_o.shape[1]
         rays_o = rays_o[0]
         rays_d = rays_d[0]
 
@@ -5137,28 +5134,38 @@ class NeRFLightning(LightningModule):
         # Improved volume rendering
         # dists = z_vals[..., 1:] - z_vals[..., :-1]  # Shape: [batch, N_samples-1]
         dists = torch.diff(z_vals, dim=-1)
-        dists = torch.cat([dists, torch.tensor([1e10], device=self.device)], -1)
+        dists = torch.cat([dists, torch.tensor([dists[-1]], device=self.device)], -1)
 
         # No need to manually expand dists as broadcasting will handle it
         alpha = 1. - torch.exp(-sigma * dists)  # Shape: [batch, N_samples]
-        alpha = alpha.unsqueeze(-1)  # Shape: [batch, N_samples, 1]
+
+        alpha_shifted = torch.cat([torch.ones_like(alpha[:, :1]), 1-alpha+1e-10], -1) # [1, a1, a2, ...]
+
+        weights = alpha * torch.cumprod(alpha_shifted, -1)[:, :-1] # (N_rays, N_samples_)
+        weights_sum = weights.sum(1) # (N_rays), the accumulated opacity along the rays
 
         # Computing transmittance
-        ones_shape = (alpha.shape[0], 1, 1)
-        T = torch.cumprod(
-            torch.cat([
-                torch.ones(ones_shape, device=self.device),
-                1. - alpha + 1e-10
-            ], dim=1),
-            dim=1
-        )[:, :-1]  # Shape: [batch, N_samples, 1]
+        
+        # T = torch.cat([torch.ones((N_rays, 1), device=self.device), torch.cumprod(1. - alpha, dim=-1)[..., :-1]], dim=-1)
+        # print(cumprod.shape, cumprod_exclusive.shape)
 
-        weights = alpha * T  # Shape: [batch, N_samples, 1]
+
+        # ones_shape = (alpha.shape[0], 1)
+
+        # T = torch.cumprod(
+        #     torch.cat([
+        #         torch.ones(ones_shape, device=self.device),
+        #         1. - alpha + 1e-10
+        #     ], dim=1),
+        #     dim=1
+        # )[:, :-1]  # Shape: [batch, N_samples, 1]
+
+        # weights = (alpha * T)  # Shape: [batch, N_samples, 1]
 
         # Compute final colors and depths
-        rgb_map = torch.sum(weights * rgb, dim=1)  # Sum along sample dimension
-        depth_map = torch.sum(weights.squeeze(-1) * z_vals, dim=-1)  # Shape: [batch]
-        acc_map = torch.sum(weights.squeeze(-1), dim=-1)  # Shape: [batch]
+        rgb_map = torch.sum(weights.unsqueeze(-1) * rgb, dim=1)  # Sum along sample dimension
+        depth_map = torch.sum(weights * z_vals, dim=-1)  # Shape: [batch]
+        acc_map = torch.sum(weights, dim=-1)  # Shape: [batch]
 
         return rgb_map.unsqueeze(0), depth_map.unsqueeze(0), acc_map.unsqueeze(0)
 
