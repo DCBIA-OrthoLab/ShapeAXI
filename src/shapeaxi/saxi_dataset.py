@@ -9,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence as pack_sequen
 import lightning as L
 from lightning.pytorch.core import LightningDataModule
 
-from torchvision import transforms
+from torchvision import transforms as T
 import sys
 from vtk.util.numpy_support import vtk_to_numpy
 from vtk.util.numpy_support import numpy_to_vtk
@@ -21,6 +21,9 @@ import nibabel as nib
 from fsl.data import gifti
 from tqdm import tqdm
 from sklearn.utils import class_weight
+from sklearn.model_selection import train_test_split
+from PIL import Image
+
 import platform
 import json
 system = platform.system()
@@ -1151,7 +1154,7 @@ synsetid_to_cate = {
 cate_to_synsetid = {v: k for k, v in synsetid_to_cate.items()}
 
 
-class ShapeNetCore(torch.utils.data.Dataset):
+class ShapeNetCore(Dataset):
 
     GRAVITATIONAL_AXIS = 1
     
@@ -1297,7 +1300,7 @@ class ShapeNetCoreDataModule(LightningDataModule):
         return DataLoader(self.test_dataset, batch_size=1, num_workers=1, drop_last=True)
 
 
-class NumpyDataset(torch.utils.data.Dataset):
+class NumpyDataset(Dataset):
     def __init__(self, path, transform=None, allow_pickle=False, num_samples=None):
         super().__init__()
         self.path = path
@@ -1361,3 +1364,157 @@ class NumpyDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=1, num_workers=1, drop_last=True)
+
+class NumpyDataset(Dataset):
+    def __init__(self, path, transform=None, allow_pickle=False, num_samples=None):
+        super().__init__()
+        self.path = path
+        self.transform = transform
+        self.pointclouds = np.load(self.path, allow_pickle=False)
+        self.num_samples = num_samples
+
+    def __len__(self):
+        if self.num_samples:
+            return self.num_samples
+        return len(self.pointclouds)
+
+    def __getitem__(self, idx):
+
+        if self.num_samples:
+            idx = random.randint(0, len(self.pointclouds) - 1)
+
+        data = torch.tensor(self.pointclouds[idx]).to(torch.float32)
+        if self.transform is not None:
+            data = self.transform(data).to(torch.float32)
+        return data
+
+
+
+class CameraPoseDataset(Dataset):
+    def __init__(self, image_paths, pose_paths, transform=None):
+        self.image_paths = image_paths
+        self.pose_paths = pose_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        # Load image
+        image = torch.from_numpy(np.array(Image.open(self.image_paths[idx])).astype(np.float32) / 255.0)                
+        image = image.permute(2, 0, 1)[0:3]  # Convert to CxHxW
+
+        if self.transform:
+            image = self.transform(image)
+        
+        # Load pose
+        with open(self.pose_paths[idx], 'r') as f:            
+            pose = np.array([list(map(float, line.strip().split())) for line in f.readlines()]).astype(np.float32)            
+
+        return image, pose
+
+class CameraPoseDataModule(LightningDataModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+
+        self.image_paths = sorted([os.path.join(self.hparams.image_dir, f) for f in os.listdir(self.hparams.image_dir) if f.endswith('.png')])
+        self.pose_paths = sorted([os.path.join(self.hparams.pose_dir, f) for f in os.listdir(self.hparams.pose_dir) if f.endswith('.txt')])
+
+        self.train_images, self.test_images, self.train_poses, self.test_poses = train_test_split(self.image_paths, self.pose_paths, test_size=self.hparams.test_size, random_state=self.hparams.random_state)
+        self.train_train_images, self.val_images, self.train_train_poses, self.val_poses = train_test_split(self.train_images, self.train_poses, test_size=self.hparams.val_size, random_state=self.hparams.random_state)
+
+        self.transform = None
+
+        if self.hparams.resize:
+            self.transform = T.Resize(self.hparams.resize)
+        
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("CameraPoseDataModule")
+        
+        # Datasets and loaders
+        group.add_argument('--image_dir', type=str, required=True)
+        group.add_argument('--resize', type=int, default=None)
+        group.add_argument('--pose_dir', type=str, required=True)
+        group.add_argument('--test_size', type=float, default=0.2)
+        group.add_argument('--val_size', type=float, default=0.1)
+        group.add_argument('--batch_size', type=int, default=8)
+        group.add_argument('--num_workers', type=int, default=4)
+        group.add_argument('--random_state', type=int, default=42)
+
+        return parent_parser
+        
+
+    def setup(self,stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_dataset = CameraPoseDataset(self.train_train_images, self.train_train_poses, transform=self.transform)
+        self.val_dataset = CameraPoseDataset(self.val_images, self.val_poses, transform=self.transform)
+        self.test_dataset = CameraPoseDataset(self.test_images, self.test_poses, transform=self.transform)
+
+    def train_dataloader(self):  
+        return DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, shuffle=True, num_workers=self.hparams.num_workers, pin_memory=True)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=1, num_workers=1)
+
+
+
+class TinyNerfDataset(Dataset):
+    def __init__(self, images, poses):
+        self.images = images
+        self.poses = poses
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        return torch.from_numpy(self.images[idx]), torch.from_numpy(self.poses[idx])
+
+class TinyNerfDataModule(LightningDataModule):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+
+        data = np.load(self.hparams.data_file)
+        images = data['images']
+        poses = data['poses']        
+
+        self.train_images, self.test_images, self.train_poses, self.test_poses = train_test_split(images, poses, test_size=self.hparams.test_size, random_state=self.hparams.random_state)
+        self.train_train_images, self.val_images, self.train_train_poses, self.val_poses = train_test_split(self.train_images, self.train_poses, test_size=self.hparams.val_size, random_state=self.hparams.random_state)
+        
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+
+        group = parent_parser.add_argument_group("CameraPoseDataModule")
+        
+        # Datasets and loaders
+        group.add_argument('--data_file', type=str, required=True)
+        
+        group.add_argument('--test_size', type=float, default=0.2)
+        group.add_argument('--val_size', type=float, default=0.1)
+        group.add_argument('--batch_size', type=int, default=1)
+        group.add_argument('--num_workers', type=int, default=4)
+        group.add_argument('--random_state', type=int, default=42)
+
+        return parent_parser
+        
+
+    def setup(self,stage=None):
+        # Assign train/val datasets for use in dataloaders
+        self.train_dataset = TinyNerfDataset(self.train_train_images, self.train_train_poses)
+        self.val_dataset = TinyNerfDataset(self.val_images, self.val_poses)
+        self.test_dataset = TinyNerfDataset(self.test_images, self.test_poses)
+
+    def train_dataloader(self):  
+        return DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, shuffle=True, num_workers=self.hparams.num_workers, pin_memory=True)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=1, num_workers=1)

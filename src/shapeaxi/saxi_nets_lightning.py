@@ -4919,7 +4919,7 @@ class SaxiDDPMPCUNet(LightningModule):
             V, F = train_batch        
             X_mesh = self.create_mesh(V, F)
             X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
-            X = self.sorter(X)
+            X, _ = self.sorter(X)
         elif isinstance(train_batch, dict):
             X = train_batch['pointcloud']
         else:
@@ -4946,7 +4946,7 @@ class SaxiDDPMPCUNet(LightningModule):
             V, F = val_batch        
             X_mesh = self.create_mesh(V, F)
             X = self.sample_points_from_meshes(X_mesh, self.hparams.num_samples)
-            X = self.sorter(X)
+            X, _ = self.sorter(X)
         elif isinstance(val_batch, dict):
             X = val_batch['pointcloud']
         else:
@@ -5002,3 +5002,255 @@ class SaxiDDPMPCUNet(LightningModule):
                 intermediates.append(X_t)
 
         return X_t, intermediates
+
+class NeRFLightning(LightningModule):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.save_hyperparameters()
+
+        # self.nerf = NeRF(input_dim=self.hparams.input_dim, 
+        #     pos_dim=self.hparams.pos_dim, 
+        #     view_dim=self.hparams.view_dim, 
+        #     hidden_dim=self.hparams.hidden_dim)
+
+        self.nerf = NeRF(pos_enc_dim=63, 
+            view_enc_dim=27, 
+            hidden=256)
+
+        self.loss_fn = nn.MSELoss()
+
+    @staticmethod
+    def add_model_specific_args(parent_parser):
+        group = parent_parser.add_argument_group("NeRF - Neural Radiance Fields")
+
+        group.add_argument("--lr", type=float, default=1e-3)
+        group.add_argument('--gamma', help='Gamma value for scheduler', type=float, default=0.99)
+        
+        # Encoder params
+        # group.add_argument("--num_samples", type=int, default=-1, help='Number of samples to take from the input images for training')
+        group.add_argument("--input_dim", type=int, default=3, help='Input dimension for the model')
+        group.add_argument("--pos_dim", type=int, default=10, help='Positional encoding output dimension for the coordinates')
+        group.add_argument("--view_dim", type=int, default=4, help='Positional encoding output dimension of the view directions')
+        group.add_argument("--hidden_dim", type=int, default=256, help='Hidden dimension for the MLPs')
+        group.add_argument("--dropout", type=float, default=0.1, help='Dropout rate')
+
+        group.add_argument("--fx", type=float, default=1111.1110311937682, help='Camera intrinsics fx')
+        group.add_argument("--fy", type=float, default=1111.1110311937682, help='Camera intrinsics fy')
+        group.add_argument("--cx", type=float, default=400.0, help='Camera intrinsics cx')
+        group.add_argument("--cy", type=float, default=400.0, help='Camera intrinsics cy')
+        group.add_argument("--width", type=int, default=800, help='Image width')
+        group.add_argument("--height", type=int, default=800, help='Image height')
+
+        group.add_argument("--near", type=float, default=1.0, help='Near clipping plane')
+        group.add_argument("--far", type=float, default=6.0, help='Far clipping plane')
+        group.add_argument("--nb_bins", type=int, default=64, help='Number of bins for the volume rendering')
+
+        return parent_parser
+    def configure_optimizers(self):
+
+        optimizer = optim.AdamW(self.parameters(), lr=self.hparams.lr)
+
+        return optimizer
+        
+        # optimizer = optim.Adam(self.parameters(), lr=self.hparams.lr)
+        # scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.hparams.gamma)
+
+        # return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler}}
+
+        # The ReduceLROnPlateau scheduler requires a monitor
+
+        # optimizer = Adam(...)
+        # return {
+        #     "optimizer": optimizer,
+        #     "lr_scheduler": {
+        #         "scheduler": ReduceLROnPlateau(optimizer, ...),
+        #         "monitor": "metric_to_track",
+        #         "frequency": "indicates how often the metric is updated",
+        #         # If "monitor" references validation metrics, then "frequency" should be set to a
+        #         # multiple of "trainer.check_val_every_n_epoch".
+        #     },
+        # }
+
+    def generate_rays(self, c2w):
+        """
+        Generate rays for a given camera configuration.
+
+        Args:
+            c2w: Camera-to-world transformation matrix (4x4).
+
+        Returns:
+            rays_o: Ray origins (H*W, 3).
+            rays_d: Ray directions (H*W, 3).
+        """
+
+        batch_size = c2w.shape[0]
+        device = self.device  # Get the device of c2w
+        focal = self.hparams.fx
+        W = self.hparams.width
+        H = self.hparams.height
+        # print(type(H), type(W), type(focal), type(c2w))
+
+        i, j = torch.meshgrid(
+            torch.arange(W, dtype=torch.float32, device=device),
+            torch.arange(H, dtype=torch.float32, device=device),
+            indexing='xy'
+        )
+        dirs = torch.stack(
+            [(i - W * .5) / focal, -(j - H * .5) / focal, -torch.ones_like(i, device = device)], -1
+        ).unsqueeze(0).repeat(batch_size, 1, 1, 1)
+        
+        # rays_d = torch.sum(dirs[..., None, :] * c2w[:, :3, :3], -1)
+        # rays_d = rays_d.view(batch_size, -1, 3)
+        
+        rays_d = torch.bmm(dirs.view(batch_size, -1, 3), c2w[:, :3, :3].transpose(-1, -2))
+        # rays_d = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)
+        
+        rays_o = c2w[:, :3, -1].unsqueeze(1).expand(rays_d.shape)
+
+        return rays_o, rays_d
+
+    def render_rays(self, rays_o, rays_d, rand=False):
+
+        near = self.hparams.near
+        far = self.hparams.far
+        N_samples = self.hparams.nb_bins
+
+        rays_o = rays_o[0]
+        rays_d = rays_d[0]
+
+        # Sampling
+        z_vals = torch.linspace(near, far, steps=N_samples, device=self.device)
+        
+
+        if rand:
+            z_vals += torch.rand(*z_vals.shape[:-1], N_samples, device=self.device) * (far - near) / N_samples
+
+        pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
+
+        # Normalize view directions
+        view_dirs = rays_d[..., None, :].expand(pts.shape)
+        
+        rgb, sigma = self(pts, view_dirs)
+
+        sigma = sigma.squeeze(-1) 
+
+        # Improved volume rendering
+        # dists = z_vals[..., 1:] - z_vals[..., :-1]  # Shape: [batch, N_samples-1]
+        dists = torch.diff(z_vals, dim=-1)
+        dists = torch.cat([dists, torch.tensor([1e10], device=self.device)], -1)
+
+        # No need to manually expand dists as broadcasting will handle it
+        alpha = 1. - torch.exp(-sigma * dists)  # Shape: [batch, N_samples]
+        alpha = alpha.unsqueeze(-1)  # Shape: [batch, N_samples, 1]
+
+        # Computing transmittance
+        ones_shape = (alpha.shape[0], 1, 1)
+        T = torch.cumprod(
+            torch.cat([
+                torch.ones(ones_shape, device=self.device),
+                1. - alpha + 1e-10
+            ], dim=1),
+            dim=1
+        )[:, :-1]  # Shape: [batch, N_samples, 1]
+
+        weights = alpha * T  # Shape: [batch, N_samples, 1]
+
+        # Compute final colors and depths
+        rgb_map = torch.sum(weights * rgb, dim=1)  # Sum along sample dimension
+        depth_map = torch.sum(weights.squeeze(-1) * z_vals, dim=-1)  # Shape: [batch]
+        acc_map = torch.sum(weights.squeeze(-1), dim=-1)  # Shape: [batch]
+
+        return rgb_map.unsqueeze(0), depth_map.unsqueeze(0), acc_map.unsqueeze(0)
+
+    # def render_rays(self, rays_o, rays_d, rand=False):
+    #     near = self.hparams.near
+    #     far = self.hparams.far
+    #     nb_bins = self.hparams.nb_bins
+
+    #     # Sampling z_vals (t in NeRF paper)
+    #     z_vals = torch.linspace(near, far, steps=nb_bins, device=self.device)
+
+    #     if rand:
+    #         z_vals += (torch.rand_like(z_vals) - 0.5) * (far - near) / nb_bins  # Stratified sampling
+
+    #     # Compute sample points along rays
+    #     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
+    #     dirs = rays_d.unsqueeze(-2).expand(pts.shape)
+
+    #     # Query network to get RGB values and density
+    #     rgb, sigma = self(pts, dirs)
+
+    #     # Compute intervals between z-values
+    #     delta = torch.diff(z_vals, dim=-1)
+    #     delta = torch.cat([delta, delta[..., -1:]], dim=-1)  # Maintain last interval
+
+    #     # Compute alpha values for volume rendering
+    #     alpha = 1.0 - torch.exp(-sigma.squeeze(-1) * delta)
+    #     alpha = torch.clamp(alpha, 0.0, 1.0)  # Avoid numerical instability
+
+    #     # Compute transmittance
+    #     eps = torch.finfo(torch.float32).eps
+    #     cumprod = torch.cumprod(1.0 - alpha + eps, dim=-1)
+    #     exclusive_cumprod = torch.cat([torch.ones_like(alpha[..., :1]), cumprod[..., :-1]], dim=-1)
+
+    #     # Compute weights for volume rendering
+    #     weights = alpha * exclusive_cumprod
+
+    #     # Render color, depth, and accumulation maps
+    #     rgb_map = (weights.unsqueeze(-1) * rgb).sum(dim=-2)
+    #     depth_map = (weights * z_vals).sum(dim=-1)
+    #     acc_map = weights.sum(dim=-1)
+
+    #     return rgb_map, depth_map, acc_map
+        
+        
+
+    def training_step(self, train_batch, batch_idx):
+        
+        images, poses = train_batch
+        
+        ray_origins, ray_directions = self.generate_rays(poses)
+        # ray_origins, ray_directions = self.get_rays(poses[0])
+
+        # images = images.view(images.shape[0], images.shape[1], -1)
+            
+        # idx_samples = torch.randint(0, ray_origins.shape[1], (self.hparams.num_samples,), device=self.device)
+        
+        # ray_origins = ray_origins[:, idx_samples]
+        # ray_directions = ray_directions[:, idx_samples]
+        # images = images[:, :, idx_samples]
+
+        rgb, _, _ = self.render_rays(ray_origins, ray_directions, rand=False)
+        
+        rgb = rgb.reshape(1, self.hparams.height, self.hparams.width, 3)
+            
+        loss = self.loss_fn(images, rgb)
+
+        self.log("train_loss", loss)
+
+        return loss
+
+    def validation_step(self, val_batch, batch_idx):
+
+        images, poses = val_batch
+        
+        ray_origins, ray_directions = self.generate_rays(poses)
+        # ray_origins, ray_directions = self.get_rays(poses[0])
+
+        # idx_samples = torch.randint(0, ray_origins.shape[1], (self.hparams.num_samples,), device=self.device)
+        
+        # ray_origins = ray_origins[:, idx_samples]
+        # ray_directions = ray_directions[:, idx_samples]
+        # images = images[:, :, idx_samples]
+
+        rgb, _, _ = self.render_rays(ray_origins, ray_directions)   
+        rgb = rgb.reshape(1, self.hparams.height, self.hparams.width, 3)
+            
+        loss = self.loss_fn(images, rgb)
+
+        self.log("val_loss", loss, sync_dist=True)
+
+    def forward(self, x_p: torch.tensor, x_v: torch.tensor):        
+        return self.nerf(x_p, x_v)
+
+        

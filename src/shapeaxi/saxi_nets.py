@@ -36,6 +36,7 @@ from torch.nn.utils.rnn import pad_sequence
 import json
 import os
 
+from positional_encodings.torch_encodings import PositionalEncoding2D
 
 from shapeaxi import utils
 from shapeaxi.saxi_layers import *
@@ -862,7 +863,7 @@ class PointNetEncoder(nn.Module):
         return m, v
 
 class HilbertSort3D(nn.Module):    
-    def __init__(self, origin=(0.0, 0.0, 0.0), radius=1.0, bins=32):
+    def __init__(self, origin=(0.0, 0.0, 0.0), radius=1.25, bins=32):
         super().__init__()
         """
         Initialize HilbertSort3D.
@@ -908,4 +909,132 @@ class HilbertSort3D(nn.Module):
         # Sort each batch of point clouds by their Hilbert indices
         sorted_indices = torch.argsort(hilbert_indices, dim=1)
         sorted_points = torch.gather(point_cloud, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
-        return sorted_points
+        return sorted_points, sorted_indices
+
+# class NeRF(nn.Module):
+#     def __init__(self, input_dim=3, pos_dim=10, view_dim=4, hidden_dim=256) -> None:
+#         super().__init__()
+        
+#         self.act = nn.ReLU()
+
+#         self.pos_dim = pos_dim
+#         p_dim = pos_dim*input_dim*2+input_dim
+        
+#         self.view_dim = view_dim
+#         v_dim = view_dim*input_dim*2+input_dim
+
+#         self.block1 = nn.Sequential(nn.Linear(p_dim, hidden_dim), 
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, hidden_dim),
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, hidden_dim),
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, hidden_dim),
+#         nn.ReLU())
+        
+#         self.block2 = nn.Sequential(nn.Linear(p_dim + hidden_dim, hidden_dim),
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, hidden_dim),
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, hidden_dim),
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, hidden_dim)) # No activation
+
+#         self.final_sigma = nn.Sequential(nn.Linear(v_dim + hidden_dim, 1), 
+#         nn.ReLU())
+
+#         self.final_rgb = nn.Sequential(nn.Linear(v_dim + hidden_dim, hidden_dim),
+#         nn.ReLU(),
+#         nn.Linear(hidden_dim, 3),
+#         nn.Sigmoid())
+
+#     def encoding(self, x, L=10):
+#         res = [x]
+#         for i in range(L):
+#             for fn in [torch.sin, torch.cos]:
+#                 res.append(fn(2 ** i * torch.pi * x))
+#         return torch.cat(res,dim=-1)
+        
+#     def forward(self, x_p, x_v):
+
+#         # parameters:
+#         # x_p: torch.Size([4, N_P, N_Samples, 3]) N_P is the number of points, N_Samples is the number of samples/bins
+#         # x_v: torch.Size([4, N_P, N_Samples, 3]) N_V is the number of view directions
+
+#         x_p_pos_enc = self.encoding(x_p, L=self.pos_dim)
+#         x_p = self.act(x_p_pos_enc)
+
+#         x_p = self.block1(x_p)
+
+#         x_p = torch.cat([x_p, x_p_pos_enc], dim=-1)
+
+#         x_p = self.block2(x_p)
+        
+#         x_v = self.encoding(x_v, L=self.view_dim)
+
+#         x = torch.cat([x_p, x_v], dim=-1)
+
+#         sigma = self.final_sigma(x)
+#         rgb = self.final_rgb(x)
+
+#         return rgb, sigma
+
+class NeRF(nn.Module):
+    def __init__(self, pos_enc_dim=63, view_enc_dim=27, hidden=256) -> None:
+        super().__init__()
+        
+        self.linear1 = nn.Sequential(nn.Linear(pos_enc_dim,hidden),nn.ReLU())
+
+        self.pre_skip_linear = nn.Sequential()
+        for _ in range(4):
+            self.pre_skip_linear.append(nn.Linear(hidden,hidden))
+            self.pre_skip_linear.append(nn.ReLU())
+
+        self.linear_skip = nn.Sequential(nn.Linear(pos_enc_dim+hidden,hidden),nn.ReLU())
+
+        self.post_skip_linear = nn.Sequential()
+        for _ in range(2):
+            self.post_skip_linear.append(nn.Linear(hidden,hidden))
+            self.post_skip_linear.append(nn.ReLU())
+
+        self.density_layer = nn.Sequential(nn.Linear(hidden,1),nn.ReLU())
+
+        self.linear2 = nn.Linear(hidden,hidden)
+
+        self.color_linear1 = nn.Sequential(nn.Linear(hidden+view_enc_dim,hidden//2),nn.ReLU())
+        self.color_linear2 = nn.Sequential(nn.Linear(hidden//2,3),nn.Sigmoid())
+
+    def encoding(self, x, L=10):
+        res = [x]
+        for i in range(L):
+            for fn in [torch.sin, torch.cos]:
+                res.append(fn(2 ** i * torch.pi * x))
+        return torch.cat(res,dim=-1)
+        
+    def forward(self, positions, view_dirs):
+        # Encode
+        pos_enc = self.encoding(positions, L=10)
+        view_enc = self.encoding(view_dirs, L=4)
+
+        x = self.linear1(pos_enc)
+        x = self.pre_skip_linear(x)
+
+        # Skip connection
+        x = torch.cat([x, pos_enc],dim=-1)
+        x = self.linear_skip(x)
+
+        x = self.post_skip_linear(x)
+
+        # Density
+        sigma = self.density_layer(x)
+
+        x = self.linear2(x)
+
+        # View Encoding
+        x = torch.cat([x,view_enc],dim=-1)
+        x = self.color_linear1(x)
+
+        # Color Prediction
+        rgb = self.color_linear2(x)
+
+        return rgb, sigma

@@ -1155,3 +1155,149 @@ class SaxiClassRingLoggerNeptune(Callback):
             }]
         )
         return fig
+
+
+class SaxiNeRFLoggerNeptune(Callback):
+    # This callback logs images for visualization during training, with the ability to log images to the Neptune logging system for easy monitoring and analysis
+    def __init__(self, log_steps = 10, *args, **kwargs):
+        self.log_steps = log_steps
+
+    @staticmethod
+    def add_logger_specific_args(parent_parser):
+        logger_group = parent_parser.add_argument_group(title='NeRF Logger')
+        logger_group.add_argument('--log_steps', type=int, help='Log steps for the callback (neptune)', default=50)
+        return parent_parser
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx): 
+        # This function is called at the end of each training batch
+        if pl_module.global_step % self.log_steps == 0:
+
+            pl_module.eval()
+            with torch.no_grad():
+
+                images, poses = batch
+
+                
+                ray_origins, ray_directions = pl_module.generate_rays(poses)
+                # ray_origins, ray_directions = pl_module.get_rays(poses[0])
+
+
+                # rgb = []
+                # depth = []
+                # acc = []
+
+                # for r_o, r_d in zip(torch.chunk(ray_origins, chunks=32, dim=1), torch.chunk(ray_directions, chunks=32, dim=1)):
+                #     r, d, a = pl_module.render_rays(r_o, r_d)            
+                #     rgb.append(r)
+                #     depth.append(d)
+                #     acc.append(a)
+
+                # rgb = torch.cat(rgb, dim=1)
+                # depth = torch.cat(depth, dim=1)
+                # acc = torch.cat(acc, dim=1)
+
+                rgb, depth, acc = pl_module.render_rays(ray_origins, ray_directions)
+
+                rgb = rgb.reshape(1, pl_module.hparams.height, pl_module.hparams.width, 3).cpu().numpy()*255
+                depth = depth.reshape(-1, pl_module.hparams.height, pl_module.hparams.width).cpu().numpy()
+                acc = acc.reshape(-1, pl_module.hparams.height, pl_module.hparams.width).cpu().numpy()
+
+                # rgb = rgb.reshape(-1, 3, pl_module.hparams.height, pl_module.hparams.width).permute(0, 2, 3, 1).cpu().numpy()*255
+                # depth = depth.reshape(-1, pl_module.hparams.height, pl_module.hparams.width).cpu().numpy()
+                # acc = acc.reshape(-1, pl_module.hparams.height, pl_module.hparams.width).cpu().numpy()
+                
+
+                fig = self.create_figure(images.cpu().numpy()*255, rgb, depth, acc)
+                trainer.logger.experiment["images/NeRF"].upload(fig)
+
+    def create_figure(self, images, rgb, depth, acc):
+        fig = make_subplots(rows=2, cols=3, subplot_titles=('Images', '', '', 'RGB', 'Depth', 'Acc'))
+
+        # Add initial frames for both images with shared coloraxis
+        fig.add_trace(go.Image(z=images[0]), row=1, col=1)
+        fig.add_trace(go.Image(z=rgb[0]), row=2, col=1)
+        fig.add_trace(go.Heatmap(z=depth[0], coloraxis="coloraxis"), row=2, col=2)
+        fig.add_trace(go.Heatmap(z=acc[0], coloraxis="coloraxis"), row=2, col=3)
+
+        fig.update_layout(
+            autosize=False,
+            width=1200,  # Adjust width as needed
+            height=1200,  # Adjust height according to aspect ratio
+            coloraxis={"colorscale": "jet"},   # Set colorscale for the shared coloraxis
+        )
+
+        return fig
+    
+    def create_animation(self, rgb, depth, acc):
+        fig = make_subplots(rows=1, cols=3, subplot_titles=('RGB', 'Depth', 'Acc'))
+
+        # Add initial frames for both images with shared coloraxis
+        fig.add_trace(go.Image(z=rgb[0]), row=1, col=1)
+        fig.add_trace(go.Heatmap(z=depth[0], coloraxis="coloraxis"), row=1, col=2)
+        fig.add_trace(go.Heatmap(z=acc[0], coloraxis="coloraxis"), row=1, col=3)
+
+        # Create frames for the animation
+        frames = []
+        for k in range(rgb.shape[0]):
+            frame = go.Frame(data=[
+                go.Image(z=rgb[k]),
+                go.Heatmap(z=depth[k], coloraxis="coloraxis"),
+                go.Heatmap(z=acc[k], coloraxis="coloraxis")
+            ], name=str(k))
+            frames.append(frame)
+        
+        # Add frames to the figure
+        fig.frames = frames
+
+        # Update layout with animation settings and fixed aspect ratio
+        fig.update_layout(
+            autosize=False,
+            width=1200,  # Adjust width as needed
+            height=600,  # Adjust height according to aspect ratio
+            coloraxis={"colorscale": "jet"},   # Set colorscale for the shared coloraxis
+            updatemenus=[{
+                "buttons": [
+                    {
+                        "args": [None, {"frame": {"duration": 500, "redraw": True},
+                                        "fromcurrent": True, "mode": "immediate"}],
+                        "label": "Play",
+                        "method": "animate"
+                    },
+                    {
+                        "args": [[None], {"frame": {"duration": 0, "redraw": False},
+                                        "mode": "immediate"}],
+                        "label": "Pause",
+                        "method": "animate"
+                    }
+                ],
+                "direction": "left",
+                "pad": {"r": 10, "t": 87},
+                "showactive": False,
+                "type": "buttons",
+                "x": 0.1,
+                "xanchor": "right",
+                "y": 0,
+                "yanchor": "top"
+            }],
+            sliders=[{
+                "steps": [
+                    {
+                        "args": [[str(k)], {"frame": {"duration": 300, "redraw": True},
+                                            "mode": "immediate"}],
+                        "label": str(k),
+                        "method": "animate"
+                    } for k in range(rgb.shape[0])
+                ],
+                "active": 0,
+                "yanchor": "top",
+                "xanchor": "left",
+                "currentvalue": {
+                    "font": {"size": 20},
+                    "prefix": "Frame:",
+                    "visible": True,
+                    "xanchor": "right"
+                },
+                "transition": {"duration": 300, "easing": "cubic-in-out"}
+            }]
+        )
+        return fig
