@@ -10,7 +10,7 @@ from tqdm import tqdm
 import vtk
 import numpy as np
 
-from shapeaxi import saxi_nets, utils
+from shapeaxi import saxi_nets_lightning, utils
 from shapeaxi.colors import bcolors
 from shapeaxi.post_process import RemoveIslands, DilateLabel, ErodeLabel, Threshold
 from shapeaxi.saxi_dataset import SaxiDataset
@@ -23,7 +23,7 @@ def main(args):
     out_channels = 34
     device = args.device
 
-    model = saxi_nets.DentalModelSeg(custom_model=args.model, device=device)
+    model = saxi_nets_lightning.DentalModelSeg(custom_model=args.model, device=device)
 
     # Check if the input is a vtk file or a csv file
     if args.csv is not None:
