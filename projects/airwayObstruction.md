@@ -81,4 +81,10 @@ SaxiMHAFB isn’t just another deep learning model. It’s a **step toward trans
 **📂 Code & Model Access:** [ShapeAXI on GitHub](https://github.com/DCBIA-OrthoLab/ShapeAXI)  
 **📋 IRB Approval:** University of Michigan (HUM00251245)
 
+## References
+
+Mattos, Claudia Trindade, Lucie Dole, Sergio Luiz Mota-Júnior, Adriana de Alcantara Cury-Saramago, Jonas Bianchi, Heesoo Oh, Karine Evangelista et al. "Explainable artificial intelligence to quantify adenoid hypertrophy-related upper airway obstruction using 3D Shape Analysis." [Journal of Dentistry 156 (2025): 105689](https://www.sciencedirect.com/science/article/abs/pii/S0300571225001344)
+
+
+
 ---
