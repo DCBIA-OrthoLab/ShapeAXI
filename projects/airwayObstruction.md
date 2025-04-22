@@ -4,6 +4,11 @@
 
 ---
 
+[![Airway Obstruction Model Explainability](https://img.youtube.com/vi/Ek2daxgTEgE/0.jpg)](https://youtu.be/Ek2daxgTEgE)
+
+
+
+
 ## A New Frontier in Diagnosing Pediatric Airway Obstruction
 
 Enlarged adenoids are a common cause of airway obstruction in children and adolescents, leading to serious consequences like obstructive sleep apnea (OSA), impaired cognitive function, and cardiovascular risks. Diagnosing these obstructions early is vital—yet the gold-standard methods, such as polysomnography, are costly, time-consuming, and impractical for large-scale screening.
