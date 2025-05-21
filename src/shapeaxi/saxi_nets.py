@@ -889,7 +889,7 @@ class HilbertSort3D(nn.Module):
         indices = torch.arange(size**3).view(size, size, size)
         return indices
 
-    def forward(self, point_cloud):
+    def forward(self, point_cloud, features=None):
         """
         Sort a batch of point clouds using Hilbert sorting.
         :param point_cloud: Tensor of shape (B, N, 3), where B is batch size, N is number of points.
@@ -909,6 +909,9 @@ class HilbertSort3D(nn.Module):
         # Sort each batch of point clouds by their Hilbert indices
         sorted_indices = torch.argsort(hilbert_indices, dim=1)
         sorted_points = torch.gather(point_cloud, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
+        if features is not None:
+            sorted_features = torch.gather(features, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, features.shape[-1]))
+            return sorted_points, sorted_features, sorted_indices
         return sorted_points, sorted_indices
 
 # class NeRF(nn.Module):
@@ -980,7 +983,7 @@ class HilbertSort3D(nn.Module):
 #         return rgb, sigma
 
 class NeRF(nn.Module):
-    def __init__(self, pos_enc_dim=63, view_enc_dim=27, hidden=256) -> None:
+    def __init__(self, pos_enc_dim=63, view_enc_dim=27, r2w_enc_dim=81, hidden=256) -> None:
         super().__init__()
         
         self.linear1 = nn.Sequential(nn.Linear(pos_enc_dim,hidden),nn.ReLU())
@@ -1001,7 +1004,7 @@ class NeRF(nn.Module):
 
         self.linear2 = nn.Linear(hidden,hidden)
 
-        self.color_linear1 = nn.Sequential(nn.Linear(hidden+view_enc_dim,hidden//2),nn.ReLU())
+        self.color_linear1 = nn.Sequential(nn.Linear(hidden+view_enc_dim+r2w_enc_dim,hidden//2),nn.ReLU())
         self.color_linear2 = nn.Sequential(nn.Linear(hidden//2,3),nn.Sigmoid())
 
     def encoding(self, x, L=10):
@@ -1011,10 +1014,11 @@ class NeRF(nn.Module):
                 res.append(fn(2 ** i * torch.pi * x))
         return torch.cat(res,dim=-1)
         
-    def forward(self, positions, view_dirs):
+    def forward(self, positions, view_dirs, rig_dirs):
         # Encode
         pos_enc = self.encoding(positions, L=10)
         view_enc = self.encoding(view_dirs, L=4)
+        rig_enc = self.encoding(rig_dirs, L=4)
 
         x = self.linear1(pos_enc)
         x = self.pre_skip_linear(x)
@@ -1031,7 +1035,7 @@ class NeRF(nn.Module):
         x = self.linear2(x)
 
         # View Encoding
-        x = torch.cat([x,view_enc],dim=-1)
+        x = torch.cat([x,view_enc,rig_enc],dim=-1)
         x = self.color_linear1(x)
 
         # Color Prediction
